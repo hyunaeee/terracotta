@@ -8,7 +8,27 @@ const quickPrompts = [
   "새 프로젝트 아이디어를 같이 생각해줘",
 ];
 
-const modelNames = ["Claude", "GPT", "Perplexity", "Higgsfield", "Genspark"];
+type ModelPreference = "latest" | "gpt" | "claude";
+
+const modelCatalog = [
+  { id: "gpt", mark: "G", name: "GPT-5.6 Sol", role: "주 추론 · 코딩", status: "현재 OpenAI 최신" },
+  { id: "claude", mark: "C", name: "Claude Sonnet 5", role: "에이전트 · 문서", status: "2026.06.30 공개" },
+  { id: "perplexity", mark: "P", name: "Perplexity Sonar Pro", role: "웹 검색 · 리서치", status: "실시간 연결" },
+  { id: "higgsfield", mark: "H", name: "Higgsfield", role: "이미지 · 영상", status: "크레딧 연결" },
+];
+
+const preferenceOptions: { id: ModelPreference; title: string; description: string }[] = [
+  { id: "latest", title: "최신 모델 우선", description: "공식 최신 목록이 바뀌면 GPT와 Claude의 순서를 자동으로 바꿔요." },
+  { id: "gpt", title: "GPT 우선", description: "GPT를 먼저 쓰고, 필요할 때 Claude가 검토하거나 이어받아요." },
+  { id: "claude", title: "Claude 우선", description: "Claude를 먼저 쓰고, 필요할 때 GPT가 검토하거나 이어받아요." },
+];
+
+const subscriptionPlans = [
+  { name: "Seed", price: "24,900", credits: "3,000", cost: "약 $8", description: "개인용 가벼운 시작", examples: "짧은 대화 중심 · 가끔 검색/생성" },
+  { name: "Grow", price: "59,000", credits: "10,000", cost: "약 $24", description: "매일 쓰는 기본 플랜", examples: "업무 대화 · 리서치 · 영상 초안", recommended: true },
+  { name: "Canopy", price: "119,000", credits: "25,000", cost: "약 $55", description: "깊은 작업과 제작", examples: "긴 문서 · 심층 검색 · 반복 생성" },
+  { name: "Studio", price: "239,000", credits: "60,000", cost: "약 $115", description: "크리에이터 집중 사용", examples: "대량 에이전트 작업 · 영상 제작" },
+];
 
 const gardenShop = [
   { id: "grass", name: "잔디 한 칸", asset: "/assets/garden/grass.png", cost: 90, unlockAt: 0, repeatable: true, defaultCell: 0 },
@@ -44,11 +64,16 @@ export default function Home() {
   const [selectedPlacement, setSelectedPlacement] = useState<string | null>(null);
   const [gardenOpen, setGardenOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelPreference, setModelPreference] = useState<ModelPreference>("latest");
   const [mobileMenu, setMobileMenu] = useState(false);
   const [ready, setReady] = useState(false);
   const [gardenNote, setGardenNote] = useState("정원은 아직 비어 있어요. 스토어에서 첫 잔디를 심어보세요.");
 
   useEffect(() => {
+    const savedPreference = window.localStorage.getItem("terracotta-model-preference");
+    if (savedPreference === "latest" || savedPreference === "gpt" || savedPreference === "claude") {
+      setModelPreference(savedPreference);
+    }
     const saved = window.localStorage.getItem("terracotta-garden-v2");
     const legacy = window.localStorage.getItem("terracotta-garden") ?? window.localStorage.getItem("orbit-simple-garden");
     if (saved) {
@@ -74,12 +99,24 @@ export default function Home() {
     window.localStorage.setItem("terracotta-garden-v2", JSON.stringify({ ownedItems, placements, sparks, growth }));
   }, [growth, ownedItems, placements, ready, sparks]);
 
+  useEffect(() => {
+    if (!ready) return;
+    window.localStorage.setItem("terracotta-model-preference", modelPreference);
+  }, [modelPreference, ready]);
+
+  const routingOrder = useMemo(() => {
+    if (modelPreference === "claude") return { primary: "Claude Sonnet 5", backup: "GPT-5.6" };
+    return { primary: "GPT-5.6", backup: "Claude Sonnet 5" };
+  }, [modelPreference]);
+
+  const preferenceLabel = modelPreference === "latest" ? "최신 우선" : modelPreference === "gpt" ? "GPT 우선" : "Claude 우선";
+
   const selectedTeam = useMemo(() => {
     const text = prompt.toLowerCase();
-    if (text.includes("영상") || text.includes("릴스")) return "Claude + Higgsfield";
-    if (text.includes("찾") || text.includes("최신") || text.includes("리서치")) return "Perplexity + Claude";
-    return "Claude + GPT";
-  }, [prompt]);
+    if (text.includes("영상") || text.includes("릴스") || text.includes("이미지")) return `Higgsfield + ${routingOrder.primary}`;
+    if (text.includes("찾") || text.includes("최신") || text.includes("리서치") || text.includes("검색")) return `Perplexity + ${routingOrder.primary}`;
+    return `${routingOrder.primary} 우선 · ${routingOrder.backup} 검토`;
+  }, [prompt, routingOrder]);
 
   const usageLevel = 12 + growth;
   const treeStage = Math.min(3, Math.floor(usageLevel / 12));
@@ -230,7 +267,7 @@ export default function Home() {
         <header className="chat-header">
           <button className="mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="메뉴 열기">☰</button>
           <button className="model-switch" onClick={() => setSettingsOpen(true)}>
-            Terracotta Auto <span>⌄</span>
+            Terracotta Auto · {preferenceLabel} <span>⌄</span>
           </button>
           <span className="private-state"><i /> 개인 메모리 켜짐</span>
         </header>
@@ -389,8 +426,47 @@ export default function Home() {
         <div className="overlay" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
           <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-label="모델 및 구독" onMouseDown={(event) => event.stopPropagation()}>
             <button className="dialog-close" onClick={() => setSettingsOpen(false)} aria-label="닫기">×</button>
-            <header><p>Model router</p><h2>Terracotta Auto</h2><span>작업마다 가장 잘하는 모델을 자동으로 연결합니다.</span></header>
-            <div className="simple-models">{modelNames.map((name, index) => <span key={name}><i>{name[0]}</i><b>{name}</b><small>{index < 3 ? "연결됨" : "사용 가능"}</small></span>)}</div>
+            <header><p>Model router · 2026.07</p><h2>Terracotta Auto</h2><span>작업에 맞는 모델을 고르고, GPT와 Claude의 우선순위는 내가 정합니다.</span></header>
+
+            <section className="settings-section priority-section" aria-labelledby="priority-title">
+              <div className="settings-heading"><div><h3 id="priority-title">기본 우선순위</h3><p>선택은 이 기기에 자동 저장돼요.</p></div><span>{routingOrder.primary}가 먼저 작업</span></div>
+              <div className="priority-options">
+                {preferenceOptions.map((option) => (
+                  <button key={option.id} className={modelPreference === option.id ? "active" : ""} onClick={() => setModelPreference(option.id)} aria-pressed={modelPreference === option.id}>
+                    <span>{modelPreference === option.id ? "●" : "○"}</span><b>{option.title}</b><small>{option.description}</small>
+                  </button>
+                ))}
+              </div>
+              <p className="router-note"><i /> 최신 우선은 공급사 공식 모델 레지스트리가 갱신될 때 자동 전환됩니다. 현재 기본 순서는 GPT-5.6 → Claude Sonnet 5입니다.</p>
+            </section>
+
+            <section className="settings-section" aria-labelledby="models-title">
+              <div className="settings-heading"><div><h3 id="models-title">연결 모델</h3><p>하나의 작업 안에서도 필요한 모델만 조합합니다.</p></div><span>4개 공급사</span></div>
+              <div className="simple-models">{modelCatalog.map((model) => <span key={model.id}><i>{model.mark}</i><span><b>{model.name}</b><small>{model.role}</small></span><em>{model.status}</em></span>)}</div>
+            </section>
+
+            <section className="settings-section pricing-section" aria-labelledby="pricing-title">
+              <div className="settings-heading"><div><h3 id="pricing-title">구독 출시 가안</h3><p>모든 플랜에서 GPT, Claude, Perplexity, Higgsfield를 사용할 수 있어요.</p></div><span>월간 · VAT 별도</span></div>
+              <div className="cost-benchmarks">
+                <span><b>GPT-5.6 Sol</b><small>$5 입력 · $30 출력 / 1M</small></span>
+                <span><b>Claude Sonnet 5</b><small>$2 입력 · $10 출력 / 1M*</small></span>
+                <span><b>Sonar Pro</b><small>$3 입력 · $15 출력 / 1M + 검색</small></span>
+                <span><b>Higgsfield</b><small>$9 · $49 · $129 크레딧 플랜</small></span>
+              </div>
+              <div className="plan-grid">
+                {subscriptionPlans.map((plan) => (
+                  <article key={plan.name} className={plan.recommended ? "recommended" : ""}>
+                    {plan.recommended && <span className="plan-badge">추천</span>}
+                    <h4>{plan.name}</h4><p>{plan.description}</p>
+                    <strong>₩{plan.price}<small>/월</small></strong>
+                    <dl><div><dt>통합 크레딧</dt><dd>{plan.credits}</dd></div><div><dt>공급 원가 예산</dt><dd>{plan.cost}</dd></div></dl>
+                    <small className="plan-example">{plan.examples}</small>
+                  </article>
+                ))}
+              </div>
+              <p className="pricing-note">짧은 텍스트는 적게, 심층 리서치와 영상은 많이 차감됩니다. 소비자용 구독을 재판매하는 금액이 아니라 API·생성 크레딧, 환율 버퍼, 라우팅·개인 메모리·저장 비용을 포함한 출시 가격입니다. *Claude의 프로모션 가격은 2026년 8월 31일까지이며 이후 원가 예산에 $3/$15 단가를 반영합니다.</p>
+              <div className="pricing-sources"><span>공식 가격 확인</span><a href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer">OpenAI</a><a href="https://www.anthropic.com/news/claude-sonnet-5" target="_blank" rel="noreferrer">Anthropic</a><a href="https://docs.perplexity.ai/docs/getting-started/pricing" target="_blank" rel="noreferrer">Perplexity</a><a href="https://higgsfield.ai/pricing" target="_blank" rel="noreferrer">Higgsfield</a></div>
+            </section>
             <button className="settings-save" onClick={() => setSettingsOpen(false)}>확인</button>
           </section>
         </div>
