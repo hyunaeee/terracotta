@@ -11,21 +11,22 @@ const quickPrompts = [
 const modelNames = ["Claude", "GPT", "Perplexity", "Higgsfield", "Genspark"];
 
 const gardenShop = [
-  { id: "stone", name: "돌길", mark: "•••", cost: 280, unlockAt: 0 },
-  { id: "pot", name: "파란 화분", mark: "▰", cost: 420, unlockAt: 0 },
-  { id: "flower", name: "노란 들꽃", mark: "✿", cost: 560, unlockAt: 2 },
-  { id: "lamp", name: "정원등", mark: "⌑", cost: 760, unlockAt: 4 },
-  { id: "fence", name: "나무 울타리", mark: "╫", cost: 880, unlockAt: 6 },
-  { id: "mushroom", name: "버섯 무리", mark: "♠", cost: 960, unlockAt: 8 },
-  { id: "bench", name: "작은 벤치", mark: "▱", cost: 1100, unlockAt: 10 },
-  { id: "mailbox", name: "우체통", mark: "▥", cost: 1280, unlockAt: 12 },
-  { id: "pond", name: "미니 연못", mark: "◉", cost: 1480, unlockAt: 16 },
-  { id: "birdbath", name: "새 물그릇", mark: "♙", cost: 1680, unlockAt: 20 },
-  { id: "picnic", name: "피크닉 매트", mark: "▦", cost: 1900, unlockAt: 24 },
-  { id: "arch", name: "덩굴 아치", mark: "∩", cost: 2200, unlockAt: 30 },
+  { id: "stone", name: "돌길", asset: "/assets/garden/stone.png", cost: 280, unlockAt: 0 },
+  { id: "pot", name: "파란 화분", asset: "/assets/garden/pot.png", cost: 420, unlockAt: 0 },
+  { id: "flower", name: "노란 들꽃", asset: "/assets/garden/flower.png", cost: 560, unlockAt: 2 },
+  { id: "lamp", name: "정원등", asset: "/assets/garden/lamp.png", cost: 760, unlockAt: 4 },
+  { id: "fence", name: "나무 울타리", asset: "/assets/garden/fence.png", cost: 880, unlockAt: 6 },
+  { id: "mushroom", name: "버섯 무리", asset: "/assets/garden/mushroom.png", cost: 960, unlockAt: 8 },
+  { id: "bench", name: "작은 벤치", asset: "/assets/garden/bench.png", cost: 1100, unlockAt: 10 },
+  { id: "mailbox", name: "우체통", asset: "/assets/garden/mailbox.png", cost: 1280, unlockAt: 12 },
+  { id: "pond", name: "미니 연못", asset: "/assets/garden/pond.png", cost: 1480, unlockAt: 16 },
+  { id: "birdbath", name: "새 물그릇", asset: "/assets/garden/birdbath.png", cost: 1680, unlockAt: 20 },
+  { id: "picnic", name: "피크닉 매트", asset: "/assets/garden/picnic.png", cost: 1900, unlockAt: 24 },
+  { id: "arch", name: "덩굴 아치", asset: "/assets/garden/arch.png", cost: 2200, unlockAt: 30 },
 ];
 
 const treeStages = ["씨앗", "새싹", "어린 나무", "큰 나무"];
+const starterGardenItems = ["stone", "pot", "flower"];
 
 type Message = { role: "user" | "assistant"; text: string; models?: string };
 
@@ -35,7 +36,7 @@ export default function Home() {
   const [isWorking, setIsWorking] = useState(false);
   const [sparks, setSparks] = useState(2480);
   const [growth, setGrowth] = useState(0);
-  const [gardenItems, setGardenItems] = useState<string[]>(["stone"]);
+  const [gardenItems, setGardenItems] = useState<string[]>(starterGardenItems);
   const [gardenOpen, setGardenOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -47,7 +48,7 @@ export default function Home() {
     if (saved) {
       try {
         const data = JSON.parse(saved) as { items?: string[]; sparks?: number; growth?: number };
-        if (Array.isArray(data.items)) setGardenItems(data.items);
+        if (Array.isArray(data.items)) setGardenItems([...new Set([...starterGardenItems, ...data.items])]);
         if (typeof data.sparks === "number") setSparks(data.sparks);
         if (typeof data.growth === "number") setGrowth(data.growth);
       } catch { /* 새 정원으로 시작합니다. */ }
@@ -78,6 +79,7 @@ export default function Home() {
   const usageLevel = 12 + growth;
   const treeStage = Math.min(3, Math.floor(usageLevel / 12));
   const nextTreeAt = treeStage === 3 ? null : (treeStage + 1) * 12;
+  const placedGardenItems = gardenShop.filter((item) => gardenItems.includes(item.id));
 
   function submitTask(event: FormEvent) {
     event.preventDefault();
@@ -237,18 +239,9 @@ export default function Home() {
             {activity.slice(0, 20).map((level, index) => <i key={index} className={`l${level}`} />)}
           </div>
           <div className={`garden-mascot tree-stage-${treeStage}`}><img src="/assets/terracotta-growth.png" alt={`${treeStages[treeStage]} 단계의 테라코타 나무`} /></div>
-          {gardenItems.includes("stone") && <span className="rail-stone">•••</span>}
-          {gardenItems.includes("pot") && <span className="rail-pot">▰</span>}
-          {gardenItems.includes("flower") && <span className="rail-flower">✿</span>}
-          {gardenItems.includes("lamp") && <span className="rail-lamp">⌑</span>}
-          {gardenItems.includes("fence") && <span className="rail-fence">╫╫</span>}
-          {gardenItems.includes("mushroom") && <span className="rail-mushroom">♠</span>}
-          {gardenItems.includes("bench") && <span className="rail-bench">▱</span>}
-          {gardenItems.includes("mailbox") && <span className="rail-mailbox">▥</span>}
-          {gardenItems.includes("pond") && <span className="rail-pond">◉</span>}
-          {gardenItems.includes("birdbath") && <span className="rail-birdbath">♙</span>}
-          {gardenItems.includes("picnic") && <span className="rail-picnic">▦</span>}
-          {gardenItems.includes("arch") && <span className="rail-arch">∩</span>}
+          {placedGardenItems.map((item) => (
+            <img key={item.id} className={`garden-item rail-${item.id}`} src={item.asset} alt="" draggable={false} />
+          ))}
         </button>
         <div className="garden-rail-foot">
           <span>지식 {128 + growth}개</span>
@@ -264,18 +257,9 @@ export default function Home() {
             <div className="large-garden">
               <div className="large-grid">{activity.map((level, index) => <i key={index} className={`l${level}`} />)}</div>
               <div className={`large-mascot tree-stage-${treeStage}`}><img src="/assets/terracotta-growth.png" alt={`${treeStages[treeStage]} 단계의 테라코타 나무`} /></div>
-              {gardenItems.includes("stone") && <span className="large-stone">•••</span>}
-              {gardenItems.includes("pot") && <span className="large-pot">▰</span>}
-              {gardenItems.includes("flower") && <span className="large-flower">✿</span>}
-              {gardenItems.includes("lamp") && <span className="large-lamp">⌑</span>}
-              {gardenItems.includes("fence") && <span className="large-fence">╫╫╫</span>}
-              {gardenItems.includes("mushroom") && <span className="large-mushroom">♠ ♠</span>}
-              {gardenItems.includes("bench") && <span className="large-bench">▱</span>}
-              {gardenItems.includes("mailbox") && <span className="large-mailbox">▥</span>}
-              {gardenItems.includes("pond") && <span className="large-pond">◉</span>}
-              {gardenItems.includes("birdbath") && <span className="large-birdbath">♙</span>}
-              {gardenItems.includes("picnic") && <span className="large-picnic">▦</span>}
-              {gardenItems.includes("arch") && <span className="large-arch">∩</span>}
+              {placedGardenItems.map((item) => (
+                <img key={item.id} className={`garden-item large-${item.id}`} src={item.asset} alt="" draggable={false} />
+              ))}
             </div>
             <div className="garden-meta"><span><b>{treeStages[treeStage]}</b>{nextTreeAt ? `다음 성장까지 ${nextTreeAt - usageLevel}` : "모두 자랐어요"}</span><span><b>{usageLevel}</b> 누적 사용량</span><span><b>{sparks.toLocaleString()}</b> Sparks</span></div>
             <div className="shop-heading">
@@ -288,7 +272,7 @@ export default function Home() {
                 const locked = usageLevel < item.unlockAt;
                 return (
                   <button key={item.id} className={locked ? "locked" : ""} disabled={owned} onClick={() => buyItem(item.id, item.name, item.cost, item.unlockAt)}>
-                    <span>{locked ? "◌" : item.mark}</span><b>{item.name}</b><small>{owned ? "배치됨" : locked ? `사용량 ${item.unlockAt}에 해금` : `${item.cost} S`}</small>
+                    <span className="shop-item-preview"><img src={item.asset} alt="" draggable={false} /></span><b>{item.name}</b><small>{owned ? "배치됨" : locked ? `사용량 ${item.unlockAt}에 해금` : `${item.cost} S`}</small>
                   </button>
                 );
               })}
