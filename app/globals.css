@@ -10,6 +10,7 @@
   --blue: #3155e7;
   --cyan: #77e5e2;
   --coral: #ff806c;
+  --moss: #466b52;
 }
 
 * { box-sizing: border-box; }
@@ -93,7 +94,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 3px
 .result-toast > span { font: 800 9px var(--font-geist-mono); background: var(--ink); color: white; padding: 5px; }
 .result-toast p { margin: 0; font-size: 11px; }.result-toast button { border: 0; background: transparent; font-weight: 800; cursor: pointer; }
 
-.companion-card { padding: 24px; background: var(--blue); color: white; min-height: 590px; }
+.companion-card { padding: 24px; background: var(--moss); color: white; min-height: 590px; }
 .companion-top .label { color: #c9d2ff; }
 .companion-top h2 { font-size: 24px; }
 .companion-top h2 span { font: 700 10px var(--font-geist-mono); color: var(--lime); margin-left: 5px; }
@@ -108,11 +109,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 3px
 .level-row div { display: flex; flex-direction: column; gap: 4px; }
 .level-row span { font: 700 9px var(--font-geist-mono); color: #c6cff8; }
 .level-row b { font-size: 14px; }.level-row strong { font: 800 12px var(--font-geist-mono); color: var(--lime); }
-.progress { height: 10px; border: 1px solid #10142f; background: #1d3499; margin-top: 11px; padding: 2px; }
+.progress { height: 10px; border: 1px solid #1e3326; background: #304c38; margin-top: 11px; padding: 2px; }
 .progress i { display: block; height: 100%; background: var(--lime); transition: width .4s steps(4); }
 .next-level { text-align: right; color: #b7c2f7; font-size: 10px; margin: 7px 0 20px; }.next-level b { color: white; }
-.trait-grid { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #7287ec; }
-.trait-grid > div { display: grid; grid-template-columns: auto 1fr; gap: 0 7px; align-items: center; padding: 10px; border-right: 1px solid #7287ec; }.trait-grid > div:last-child { border: 0; }
+.trait-grid { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #779481; }
+.trait-grid > div { display: grid; grid-template-columns: auto 1fr; gap: 0 7px; align-items: center; padding: 10px; border-right: 1px solid #779481; }.trait-grid > div:last-child { border: 0; }
 .trait-icon { grid-row: span 2; display: grid; place-items: center; width: 24px; height: 24px; color: var(--ink); border: 1px solid var(--ink); font-weight: 900; }.trait-icon.lime { background: var(--lime); }.trait-icon.blue { background: var(--cyan); }.trait-icon.coral { background: var(--coral); }
 .trait-grid small { font-size: 8px; color: #c7d0fb; }.trait-grid b { font-size: 11px; }
 

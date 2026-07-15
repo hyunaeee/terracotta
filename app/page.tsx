@@ -157,14 +157,14 @@ export default function Home() {
           </div>
 
           <button className="mascot-window" onClick={() => setModal("growth")} aria-label="루미 성장 단계 보기">
-            <img src="/assets/orbit-evolution.png" alt="전기 라임색 꼬마 AI 루미" />
+            <img src="/assets/orbit-growth-v2.png" alt="잎 두 장이 자라난 작은 씨앗 친구 루미" />
             <span className="pixel-spark one" />
             <span className="pixel-spark two" />
             <span className="speech">오늘도 하나<br />배웠어!</span>
           </button>
 
           <div className="level-row">
-            <div><span>LEVEL 12</span><b>호기심 많은 코어</b></div>
+            <div><span>LEVEL 12</span><b>호기심 많은 새싹</b></div>
             <strong>{xp}%</strong>
           </div>
           <div className="progress" aria-label={`다음 레벨까지 ${xp}%`}><i style={{ width: `${xp}%` }} /></div>
@@ -222,9 +222,9 @@ export default function Home() {
               <>
                 <p className="label">EVOLUTION LOG</p>
                 <h2>루미가 당신과 함께<br />진화하고 있어요.</h2>
-                <div className="evolution-sheet"><img src="/assets/orbit-evolution.png" alt="세포부터 자비스형 두뇌까지 루미의 네 가지 성장 단계" /></div>
+                <div className="evolution-sheet"><img src="/assets/orbit-growth-v2.png" alt="씨앗 세포부터 든든한 나무 친구까지 루미의 네 가지 성장 단계" /></div>
                 <div className="evolution-steps">
-                  <span>01<br /><b>첫 신호</b></span><span className="current">02<br /><b>꼬마 코어</b></span><span>03<br /><b>뉴럴 메이트</b></span><span>04<br /><b>오르빗 마인드</b></span>
+                  <span>01<br /><b>씨앗 세포</b></span><span className="current">02<br /><b>새싹</b></span><span>03<br /><b>어린 나무</b></span><span>04<br /><b>나무 친구</b></span>
                 </div>
                 <p className="modal-note">작업을 끝내고 취향을 알려줄 때마다 루미의 기억, 판단력, 창의성이 자랍니다.</p>
               </>
