@@ -33,7 +33,7 @@ export default function Home() {
   const [gardenNote, setGardenNote] = useState("오늘도 천천히 자라고 있어요.");
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("orbit-simple-garden");
+    const saved = window.localStorage.getItem("terracotta-garden") ?? window.localStorage.getItem("orbit-simple-garden");
     if (saved) {
       try {
         const data = JSON.parse(saved) as { items?: string[]; sparks?: number; growth?: number };
@@ -47,7 +47,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready) return;
-    window.localStorage.setItem("orbit-simple-garden", JSON.stringify({ items: gardenItems, sparks, growth }));
+    window.localStorage.setItem("terracotta-garden", JSON.stringify({ items: gardenItems, sparks, growth }));
   }, [gardenItems, growth, ready, sparks]);
 
   const selectedTeam = useMemo(() => {
@@ -114,8 +114,8 @@ export default function Home() {
     <main className="app-frame">
       <aside className={`sidebar ${mobileMenu ? "open" : ""}`}>
         <div className="sidebar-top">
-          <button className="wordmark" onClick={newChat} aria-label="Orbit 홈">
-            <span className="wordmark-seed" /> Orbit
+          <button className="wordmark" onClick={newChat} aria-label="테라코타 홈">
+            <span className="wordmark-seed" /> Terracotta
           </button>
           <button className="sidebar-close" onClick={() => setMobileMenu(false)} aria-label="메뉴 닫기">×</button>
         </div>
@@ -137,7 +137,7 @@ export default function Home() {
 
         <div className="sidebar-account">
           <span>LK</span>
-          <div><b>내 Orbit</b><small>{sparks.toLocaleString()} Sparks</small></div>
+          <div><b>내 테라코타</b><small>{sparks.toLocaleString()} Sparks</small></div>
           <button aria-label="계정 메뉴">•••</button>
         </div>
       </aside>
@@ -148,7 +148,7 @@ export default function Home() {
         <header className="chat-header">
           <button className="mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="메뉴 열기">☰</button>
           <button className="model-switch" onClick={() => setSettingsOpen(true)}>
-            Orbit Auto <span>⌄</span>
+            Terracotta Auto <span>⌄</span>
           </button>
           <span className="private-state"><i /> 개인 메모리 켜짐</span>
         </header>
@@ -192,8 +192,8 @@ export default function Home() {
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handleComposerKey}
-              placeholder="Orbit에게 무엇이든 물어보세요"
-              aria-label="Orbit에게 보낼 메시지"
+              placeholder="테라코타에게 무엇이든 물어보세요"
+              aria-label="테라코타에게 보낼 메시지"
               rows={1}
             />
             <div className="composer-actions">
@@ -205,7 +205,7 @@ export default function Home() {
               <button className="send-button" disabled={!prompt.trim() || isWorking} aria-label="메시지 보내기">↑</button>
             </div>
           </form>
-          <p>Orbit는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
+          <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
         </div>
       </section>
 
@@ -218,7 +218,7 @@ export default function Home() {
           <div className="garden-grid">
             {activity.slice(0, 30).map((level, index) => <i key={index} className={`l${level}`} />)}
           </div>
-          <div className="garden-mascot"><img src="/assets/orbit-growth-v2.png" alt="새싹 테라코타" /></div>
+          <div className="garden-mascot"><img src="/assets/terracotta-growth.png" alt="새싹 테라코타" /></div>
           {gardenItems.includes("stone") && <span className="rail-stone">•••</span>}
           {gardenItems.includes("pot") && <span className="rail-pot">▰</span>}
           {gardenItems.includes("flower") && <span className="rail-flower">✿</span>}
@@ -237,7 +237,7 @@ export default function Home() {
             <header><p>Terracotta Garden</p><h2>내 지식 정원</h2><span>{gardenNote}</span></header>
             <div className="large-garden">
               <div className="large-grid">{activity.map((level, index) => <i key={index} className={`l${level}`} />)}</div>
-              <div className="large-mascot"><img src="/assets/orbit-growth-v2.png" alt="새싹 테라코타" /></div>
+              <div className="large-mascot"><img src="/assets/terracotta-growth.png" alt="새싹 테라코타" /></div>
               {gardenItems.includes("stone") && <span className="large-stone">•••</span>}
               {gardenItems.includes("pot") && <span className="large-pot">▰</span>}
               {gardenItems.includes("flower") && <span className="large-flower">✿</span>}
@@ -263,7 +263,7 @@ export default function Home() {
         <div className="overlay" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
           <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-label="모델 및 구독" onMouseDown={(event) => event.stopPropagation()}>
             <button className="dialog-close" onClick={() => setSettingsOpen(false)} aria-label="닫기">×</button>
-            <header><p>Model router</p><h2>Orbit Auto</h2><span>작업마다 가장 잘하는 모델을 자동으로 연결합니다.</span></header>
+            <header><p>Model router</p><h2>Terracotta Auto</h2><span>작업마다 가장 잘하는 모델을 자동으로 연결합니다.</span></header>
             <div className="simple-models">{modelNames.map((name, index) => <span key={name}><i>{name[0]}</i><b>{name}</b><small>{index < 3 ? "연결됨" : "사용 가능"}</small></span>)}</div>
             <button className="settings-save" onClick={() => setSettingsOpen(false)}>확인</button>
           </section>
