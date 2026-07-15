@@ -15,18 +15,18 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: base,
     title: "ORBIT — 나와 함께 자라는 AI",
-    description: "가장 잘하는 AI 모델을 골라 일하고, 당신을 배울수록 성장하는 개인 AI 비서.",
+    description: "가장 잘하는 AI 모델과 일하고, 사용한 만큼 나만의 지식 정원을 가꾸는 개인 AI 비서.",
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
     openGraph: {
       title: "ORBIT — 나와 함께 자라는 AI",
-      description: "생각은 맡겨. 나는 자랄게.",
-      images: [{ url: new URL("/og.png", base).toString(), width: 1732, height: 907, alt: "새싹처럼 성장하는 ORBIT AI" }],
+      description: "생각은 맡겨. 지식은 정원처럼 자랄게.",
+      images: [{ url: new URL("/og-garden.png", base).toString(), width: 1732, height: 907, alt: "지식을 심고 꾸미는 테라코타 가든" }],
     },
     twitter: {
       card: "summary_large_image",
       title: "ORBIT — 나와 함께 자라는 AI",
-      description: "생각은 맡겨. 나는 자랄게.",
-      images: [new URL("/og.png", base).toString()],
+      description: "생각은 맡겨. 지식은 정원처럼 자랄게.",
+      images: [new URL("/og-garden.png", base).toString()],
     },
   };
 }
