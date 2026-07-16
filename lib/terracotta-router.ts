@@ -47,6 +47,7 @@ const schemaStatements = [
 
 const seeds = [
   { provider: "openai" as const, model: "gpt-5.6", name: "GPT-5.6 Sol", rank: 560, input: 5_000_000, output: 30_000_000 },
+  { provider: "anthropic" as const, model: "claude-fable-5", name: "Claude Fable 5", rank: 510, input: 10_000_000, output: 50_000_000 },
   { provider: "anthropic" as const, model: "claude-sonnet-5", name: "Claude Sonnet 5", rank: 500, input: 3_000_000, output: 15_000_000 },
   { provider: "perplexity" as const, model: "sonar-pro", name: "Perplexity Sonar Pro", rank: 100, input: 3_000_000, output: 15_000_000 },
   { provider: "higgsfield" as const, model: "higgsfield-mcp", name: "Higgsfield MCP", rank: 100, input: 0, output: 0 },
@@ -62,7 +63,7 @@ function safeError(error: unknown) {
 }
 
 function rankVersion(id: string) {
-  const match = id.match(/(?:gpt-|claude-(?:sonnet|opus)-)(\d+)(?:[.-](\d+))?/i);
+  const match = id.match(/(?:gpt-|claude-(?:fable|sonnet|opus)-)(\d+)(?:[.-](\d+))?/i);
   return match ? Number(match[1]) * 100 + Number(match[2] ?? 0) : 0;
 }
 
@@ -71,7 +72,7 @@ function isOpenAiFrontier(id: string) {
 }
 
 function isClaudeFrontier(id: string) {
-  return /^claude-(?:sonnet|opus)-\d/i.test(id) && !/(haiku|instant)/i.test(id);
+  return /^claude-(?:fable|sonnet|opus)-\d/i.test(id) && !/(haiku|instant)/i.test(id);
 }
 
 async function ensureDatabase(db: D1Database) {
@@ -83,6 +84,7 @@ async function ensureDatabase(db: D1Database) {
     const status = seed.provider === "higgsfield" ? "mcp_auth_required" : "needs_key";
     await db.prepare("INSERT OR IGNORE INTO provider_sync (provider, status, current_model) VALUES (?, ?, ?)").bind(seed.provider, status, seed.model).run();
   }
+  await db.prepare("UPDATE provider_sync SET current_model='claude-fable-5', next_sync_at=NULL WHERE provider='anthropic' AND current_model='claude-sonnet-5' AND status='needs_key'").run();
 }
 
 async function setSyncState(db: D1Database, provider: ProviderId, status: string, currentModel: string | null, error: string | null) {
@@ -112,7 +114,7 @@ async function syncOpenAi(db: D1Database, key?: string) {
 }
 
 async function syncAnthropic(db: D1Database, key?: string) {
-  if (!key) return setSyncState(db, "anthropic", "needs_key", "claude-sonnet-5", null);
+  if (!key) return setSyncState(db, "anthropic", "needs_key", "claude-fable-5", null);
   const response = await fetch("https://api.anthropic.com/v1/models?limit=1000", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`Anthropic model registry returned ${response.status}`);
   const payload = await response.json() as { data?: Array<{ id: string; display_name?: string; created_at?: string }> };
@@ -120,8 +122,8 @@ async function syncAnthropic(db: D1Database, key?: string) {
   const current = candidates[0];
   if (!current) throw new Error("Anthropic registry did not return a routable frontier model");
   await db.prepare("UPDATE model_registry SET is_routable=0 WHERE provider='anthropic'").run();
-  const exact = /^claude-sonnet-5(?:$|-)/i.test(current.id);
-  await upsertLiveModel(db, { provider: "anthropic", model_id: current.id, display_name: current.display_name ?? current.id, remote_created_at: Math.floor(Date.parse(current.created_at ?? "") / 1000) || 0, version_rank: rankVersion(current.id), input_price_micros: exact ? 3_000_000 : 10_000_000, output_price_micros: exact ? 15_000_000 : 60_000_000 });
+  const prices = /^claude-fable-5(?:$|-)/i.test(current.id) ? [10_000_000, 50_000_000] : /^claude-opus-4-8(?:$|-)/i.test(current.id) ? [5_000_000, 25_000_000] : /^claude-sonnet-5(?:$|-)/i.test(current.id) ? [3_000_000, 15_000_000] : [10_000_000, 60_000_000];
+  await upsertLiveModel(db, { provider: "anthropic", model_id: current.id, display_name: current.display_name ?? current.id, remote_created_at: Math.floor(Date.parse(current.created_at ?? "") / 1000) || 0, version_rank: rankVersion(current.id), input_price_micros: prices[0], output_price_micros: prices[1] });
   await setSyncState(db, "anthropic", "connected", current.id, null);
 }
 
@@ -129,8 +131,8 @@ export async function syncProviderRegistry(force = false) {
   const env = runtimeEnv();
   const db = env.DB;
   await ensureDatabase(db);
-  const next = await db.prepare("SELECT MIN(next_sync_at) AS next_sync_at FROM provider_sync").first<{ next_sync_at: string | null }>();
-  if (!force && next?.next_sync_at && Date.parse(next.next_sync_at) > Date.now()) return;
+  const due = await db.prepare("SELECT COUNT(*) AS count FROM provider_sync WHERE next_sync_at IS NULL OR next_sync_at <= ?").bind(new Date().toISOString()).first<{ count: number }>();
+  if (!force && Number(due?.count ?? 0) === 0) return;
 
   const jobs: Array<[ProviderId, () => Promise<void>]> = [
     ["openai", () => syncOpenAi(db, env.OPENAI_API_KEY)],
@@ -249,7 +251,7 @@ export async function runAssistant(prompt: string, preference: ModelPreference) 
     if (!configured(env, provider)) continue;
     const model = models.find((item) => item.provider === provider);
     try {
-      const invocation = provider === "openai" ? await invokeOpenAi(env.OPENAI_API_KEY!, model?.model_id ?? "gpt-5.6", prompt) : provider === "anthropic" ? await invokeAnthropic(env.ANTHROPIC_API_KEY!, model?.model_id ?? "claude-sonnet-5", prompt) : await invokePerplexity(env.PERPLEXITY_API_KEY!, prompt);
+      const invocation = provider === "openai" ? await invokeOpenAi(env.OPENAI_API_KEY!, model?.model_id ?? "gpt-5.6", prompt) : provider === "anthropic" ? await invokeAnthropic(env.ANTHROPIC_API_KEY!, model?.model_id ?? "claude-fable-5", prompt) : await invokePerplexity(env.PERPLEXITY_API_KEY!, prompt);
       if (!invocation.text.trim()) throw new Error(`${provider} returned an empty response`);
       const costMicros = await recordUsage(env.DB, invocation, task, model);
       return { text: invocation.text, provider: invocation.provider, model: invocation.model, task, costUsd: costMicros / 1_000_000, citations: invocation.citations ?? [], live: true };

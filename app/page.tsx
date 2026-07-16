@@ -18,10 +18,11 @@ type RegistryStatus = {
 };
 
 const modelCatalog = [
-  { id: "gpt", mark: "G", name: "GPT-5.6 Sol", role: "주 추론 · 코딩", status: "현재 OpenAI 최신" },
-  { id: "claude", mark: "C", name: "Claude Sonnet 5", role: "에이전트 · 문서", status: "2026.06.30 공개" },
-  { id: "perplexity", mark: "P", name: "Perplexity Sonar Pro", role: "웹 검색 · 리서치", status: "실시간 연결" },
-  { id: "higgsfield", mark: "H", name: "Higgsfield", role: "이미지 · 영상", status: "크레딧 연결" },
+  { id: "gpt", provider: "openai", mark: "G", name: "GPT-5.6 Sol", role: "주 추론 · 코딩" },
+  { id: "fable", provider: "anthropic", mark: "F", name: "Claude Fable 5", role: "최고 난도 · 장기 에이전트" },
+  { id: "claude", provider: "anthropic", mark: "C", name: "Claude Sonnet 5", role: "빠른 에이전트 · 문서" },
+  { id: "perplexity", provider: "perplexity", mark: "P", name: "Perplexity Sonar Pro", role: "웹 검색 · 리서치" },
+  { id: "higgsfield", provider: "higgsfield", mark: "H", name: "Higgsfield", role: "이미지 · 영상" },
 ];
 
 const preferenceOptions: { id: ModelPreference; title: string; description: string }[] = [
@@ -130,7 +131,7 @@ export default function Home() {
   }
 
   const routingOrder = useMemo(() => {
-    if (modelPreference === "claude") return { primary: "Claude Sonnet 5", backup: "GPT-5.6" };
+    if (modelPreference === "claude") return { primary: registryStatus?.models.find((model) => model.provider === "anthropic")?.name ?? "Claude Fable 5", backup: "GPT-5.6" };
     if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "anthropic") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "openai")?.name ?? "GPT" };
     if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "openai") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "anthropic")?.name ?? "Claude" };
     return { primary: "GPT-5.6", backup: "Claude Sonnet 5" };
@@ -485,11 +486,11 @@ export default function Home() {
             </section>
 
             <section className="settings-section" aria-labelledby="models-title">
-              <div className="settings-heading"><div><h3 id="models-title">연결 모델</h3><p>하나의 작업 안에서도 필요한 모델만 조합합니다.</p></div><span>4개 공급사</span></div>
+              <div className="settings-heading"><div><h3 id="models-title">연결 모델</h3><p>하나의 작업 안에서도 필요한 모델만 조합합니다.</p></div><span>4개 공급사 · 5개 핵심 모델</span></div>
               <div className="simple-models">{modelCatalog.map((model) => {
-                const provider = model.id === "gpt" ? "openai" : model.id === "claude" ? "anthropic" : model.id;
+                const provider = model.provider;
                 const connection = registryStatus?.connections.find((item) => item.provider === provider);
-                const liveModel = registryStatus?.models.find((item) => item.provider === provider);
+                const liveModel = model.id === "claude" ? null : registryStatus?.models.find((item) => item.provider === provider);
                 const status = connection?.status === "connected" || connection?.status === "mcp_connected" ? "실제 연결됨" : connection?.status === "mcp_auth_required" ? "MCP 인증 필요" : connection?.status === "error" ? "연결 오류" : "API 키 필요";
                 return <span key={model.id}><i>{model.mark}</i><span><b>{liveModel?.name ?? model.name}</b><small>{model.role}</small></span><em className={connection?.configured ? "connected" : ""}>{status}</em></span>;
               })}</div>
@@ -500,6 +501,7 @@ export default function Home() {
               <div className="settings-heading"><div><h3 id="pricing-title">구독 출시 가안</h3><p>모든 플랜에서 GPT, Claude, Perplexity, Higgsfield를 사용할 수 있어요.</p></div><span>월간 · VAT 별도</span></div>
               <div className="cost-benchmarks">
                 <span><b>GPT-5.6 Sol</b><small>$5 입력 · $30 출력 / 1M</small></span>
+                <span><b>Claude Fable 5</b><small>$10 입력 · $50 출력 / 1M</small></span>
                 <span><b>Claude Sonnet 5</b><small>$2 입력 · $10 출력 / 1M*</small></span>
                 <span><b>Sonar Pro</b><small>$3 입력 · $15 출력 / 1M + 검색</small></span>
                 <span><b>Higgsfield</b><small>$9 · $49 · $129 크레딧 플랜</small></span>
@@ -515,7 +517,7 @@ export default function Home() {
                   </article>
                 ))}
               </div>
-              <p className="pricing-note">짧은 텍스트는 적게, 심층 리서치와 영상은 많이 차감됩니다. 소비자용 구독을 재판매하는 금액이 아니라 API·생성 크레딧, 환율 버퍼, 라우팅·개인 메모리·저장 비용을 포함한 출시 가격입니다. *Claude의 프로모션 가격은 2026년 8월 31일까지이며 이후 원가 예산에 $3/$15 단가를 반영합니다.</p>
+              <p className="pricing-note">짧은 텍스트는 적게, 심층 리서치·영상·Fable 5 최고 난도 작업은 많이 차감됩니다. 소비자용 구독을 재판매하는 금액이 아니라 API·생성 크레딧, 환율 버퍼, 라우팅·개인 메모리·저장 비용을 포함한 출시 가격입니다. *Sonnet 5의 프로모션 가격은 2026년 8월 31일까지이며 이후 원가 예산에 $3/$15 단가를 반영합니다.</p>
               <div className="pricing-sources"><span>공식 가격 확인</span><a href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer">OpenAI</a><a href="https://www.anthropic.com/news/claude-sonnet-5" target="_blank" rel="noreferrer">Anthropic</a><a href="https://docs.perplexity.ai/docs/getting-started/pricing" target="_blank" rel="noreferrer">Perplexity</a><a href="https://higgsfield.ai/pricing" target="_blank" rel="noreferrer">Higgsfield</a></div>
             </section>
             <button className="settings-save" onClick={() => setSettingsOpen(false)}>확인</button>
