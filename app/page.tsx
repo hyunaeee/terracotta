@@ -9,6 +9,13 @@ const quickPrompts = [
 ];
 
 type ModelPreference = "latest" | "gpt" | "claude";
+type RegistryStatus = {
+  syncIntervalHours: number;
+  latestPrimary: { provider: string; model: string; modelId: string; source: string } | null;
+  models: Array<{ provider: string; modelId: string; name: string; source: string }>;
+  connections: Array<{ provider: string; status: string; model: string | null; lastSyncedAt: string | null; error: string | null; configured: boolean }>;
+  monthlyUsage: { calls: number; costUsd: number; budgetUsd: number };
+};
 
 const modelCatalog = [
   { id: "gpt", mark: "G", name: "GPT-5.6 Sol", role: "주 추론 · 코딩", status: "현재 OpenAI 최신" },
@@ -65,6 +72,8 @@ export default function Home() {
   const [gardenOpen, setGardenOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelPreference, setModelPreference] = useState<ModelPreference>("latest");
+  const [registryStatus, setRegistryStatus] = useState<RegistryStatus | null>(null);
+  const [registryLoading, setRegistryLoading] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [ready, setReady] = useState(false);
   const [gardenNote, setGardenNote] = useState("정원은 아직 비어 있어요. 스토어에서 첫 잔디를 심어보세요.");
@@ -102,12 +111,30 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     window.localStorage.setItem("terracotta-model-preference", modelPreference);
+    void fetch("/api/model-registry", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preference: modelPreference }) }).catch(() => undefined);
   }, [modelPreference, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadRegistry();
+  }, [ready]);
+
+  async function loadRegistry(refresh = false) {
+    setRegistryLoading(true);
+    try {
+      const response = await fetch(`/api/model-registry${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("registry unavailable");
+      setRegistryStatus(await response.json() as RegistryStatus);
+    } catch { setRegistryStatus(null); }
+    finally { setRegistryLoading(false); }
+  }
 
   const routingOrder = useMemo(() => {
     if (modelPreference === "claude") return { primary: "Claude Sonnet 5", backup: "GPT-5.6" };
+    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "anthropic") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "openai")?.name ?? "GPT" };
+    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "openai") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "anthropic")?.name ?? "Claude" };
     return { primary: "GPT-5.6", backup: "Claude Sonnet 5" };
-  }, [modelPreference]);
+  }, [modelPreference, registryStatus]);
 
   const preferenceLabel = modelPreference === "latest" ? "최신 우선" : modelPreference === "gpt" ? "GPT 우선" : "Claude 우선";
 
@@ -124,7 +151,7 @@ export default function Home() {
   const grassCells = useMemo(() => new Set(placements.filter((item) => item.itemId === "grass").map((item) => item.cell)), [placements]);
   const grassCount = grassCells.size;
 
-  function submitTask(event: FormEvent) {
+  async function submitTask(event: FormEvent) {
     event.preventDefault();
     const task = prompt.trim();
     if (!task || isWorking) return;
@@ -132,17 +159,28 @@ export default function Home() {
     setMessages((items) => [...items, { role: "user", text: task }]);
     setPrompt("");
     setIsWorking(true);
-    window.setTimeout(() => {
+    try {
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference }) });
+      const payload = await response.json() as { text?: string; model?: string; provider?: string; costUsd?: number; error?: string; code?: string };
+      if (!response.ok) {
+        const guidance = payload.code === "HIGGSFIELD_MCP_AUTH_REQUIRED" ? "Higgsfield 계정을 MCP로 인증하면 이미지와 영상 생성이 바로 연결돼요." : payload.code === "PROVIDER_KEY_REQUIRED" ? "모델 라우터는 준비됐어요. 설정 화면에 표시된 공급사 API 키를 서버에 연결하면 실제 답변을 시작합니다." : payload.error ?? "연결된 모델이 잠시 응답하지 않았어요.";
+        setMessages((items) => [...items, { role: "assistant", text: guidance, models: "연결 설정 필요" }]);
+        return;
+      }
       setMessages((items) => [...items, {
         role: "assistant",
-        text: "좋아요. 필요한 정보를 정리하고, 바로 실행할 수 있는 형태로 준비했어요. 이 작업에서 배운 내용은 테라코타 가든에도 심어둘게요.",
-        models: team,
+        text: payload.text ?? "답변을 준비했어요.",
+        models: `${payload.model ?? team} · 실제 API${typeof payload.costUsd === "number" ? ` · $${payload.costUsd.toFixed(4)}` : ""}`,
       }]);
       setSparks((value) => value + 36);
       setGrowth((value) => value + 1);
       setGardenNote("방금 끝낸 작업이 새 지식으로 쌓였어요. 받은 Sparks로 정원을 꾸며보세요.");
+      void loadRegistry();
+    } catch {
+      setMessages((items) => [...items, { role: "assistant", text: "실제 모델 백엔드에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.", models: "연결 오류" }]);
+    } finally {
       setIsWorking(false);
-    }, 1400);
+    }
   }
 
   function handleComposerKey(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -428,8 +466,14 @@ export default function Home() {
             <button className="dialog-close" onClick={() => setSettingsOpen(false)} aria-label="닫기">×</button>
             <header><p>Model router · 2026.07</p><h2>Terracotta Auto</h2><span>작업에 맞는 모델을 고르고, GPT와 Claude의 우선순위는 내가 정합니다.</span></header>
 
+            <div className="router-runtime">
+              <div><i className={registryStatus?.connections.some((item) => item.configured) ? "online" : ""} /><span><b>{registryStatus?.latestPrimary?.model ?? "레지스트리 확인 중"}</b><small>{registryStatus ? `${registryStatus.syncIntervalHours}시간마다 공식 모델 목록 자동 갱신` : "백엔드 연결 상태를 불러오고 있어요"}</small></span></div>
+              <div><b>${(registryStatus?.monthlyUsage.costUsd ?? 0).toFixed(2)}</b><small>이번 달 공급 원가 / ${registryStatus?.monthlyUsage.budgetUsd ?? 24}</small></div>
+              <button onClick={() => void loadRegistry(true)} disabled={registryLoading}>{registryLoading ? "확인 중" : "지금 갱신"}</button>
+            </div>
+
             <section className="settings-section priority-section" aria-labelledby="priority-title">
-              <div className="settings-heading"><div><h3 id="priority-title">기본 우선순위</h3><p>선택은 이 기기에 자동 저장돼요.</p></div><span>{routingOrder.primary}가 먼저 작업</span></div>
+              <div className="settings-heading"><div><h3 id="priority-title">기본 우선순위</h3><p>선택은 개인 레지스트리와 이 기기에 저장돼요.</p></div><span>{routingOrder.primary}가 먼저 작업</span></div>
               <div className="priority-options">
                 {preferenceOptions.map((option) => (
                   <button key={option.id} className={modelPreference === option.id ? "active" : ""} onClick={() => setModelPreference(option.id)} aria-pressed={modelPreference === option.id}>
@@ -437,12 +481,19 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <p className="router-note"><i /> 최신 우선은 공급사 공식 모델 레지스트리가 갱신될 때 자동 전환됩니다. 현재 기본 순서는 GPT-5.6 → Claude Sonnet 5입니다.</p>
+              <p className="router-note"><i /> 최신 우선은 OpenAI와 Anthropic의 공식 모델 생성 시각을 비교해 자동 전환합니다. 키가 연결되기 전에는 검증된 기본 목록을 사용합니다.</p>
             </section>
 
             <section className="settings-section" aria-labelledby="models-title">
               <div className="settings-heading"><div><h3 id="models-title">연결 모델</h3><p>하나의 작업 안에서도 필요한 모델만 조합합니다.</p></div><span>4개 공급사</span></div>
-              <div className="simple-models">{modelCatalog.map((model) => <span key={model.id}><i>{model.mark}</i><span><b>{model.name}</b><small>{model.role}</small></span><em>{model.status}</em></span>)}</div>
+              <div className="simple-models">{modelCatalog.map((model) => {
+                const provider = model.id === "gpt" ? "openai" : model.id === "claude" ? "anthropic" : model.id;
+                const connection = registryStatus?.connections.find((item) => item.provider === provider);
+                const liveModel = registryStatus?.models.find((item) => item.provider === provider);
+                const status = connection?.status === "connected" || connection?.status === "mcp_connected" ? "실제 연결됨" : connection?.status === "mcp_auth_required" ? "MCP 인증 필요" : connection?.status === "error" ? "연결 오류" : "API 키 필요";
+                return <span key={model.id}><i>{model.mark}</i><span><b>{liveModel?.name ?? model.name}</b><small>{model.role}</small></span><em className={connection?.configured ? "connected" : ""}>{status}</em></span>;
+              })}</div>
+              <p className="connection-note">API 키는 브라우저나 D1에 저장하지 않고 암호화된 서버 환경변수로만 사용합니다. Higgsfield는 공식 정책에 따라 API 키 대신 계정 인증 MCP로 연결됩니다.</p>
             </section>
 
             <section className="settings-section pricing-section" aria-labelledby="pricing-title">
