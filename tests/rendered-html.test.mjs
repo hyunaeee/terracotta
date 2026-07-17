@@ -51,3 +51,39 @@ test("implements a durable, encrypted OAuth MCP hub", async () => {
   assert.match(connectRoute, /startMcpConnection/);
   assert.match(toolsRoute, /callMcpTool/);
 });
+
+test("separates lawn terrain from free-position garden objects", async () => {
+  const [page, css] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/globals.css"),
+  ]);
+
+  assert.match(page, /terracotta-garden-v3/);
+  assert.match(page, /groundTiles/);
+  assert.match(page, /decorations/);
+  assert.match(page, /handleGardenPointerMove/);
+  assert.match(page, /characterPosition/);
+  assert.match(page, /grass-sage-connected/);
+  assert.match(page, /requiresFullLawn/);
+  assert.match(page, /채소 텃밭/);
+  assert.match(page, /벚꽃나무/);
+  assert.match(page, /라벤더 꽃나무/);
+  assert.match(css, /\.garden-ground-grid\.connected/);
+  assert.match(css, /\.free-garden-item/);
+  assert.match(css, /touch-action: none/);
+
+  for (const asset of [
+    "vegetable-bed.png",
+    "tomato-bed.png",
+    "herb-bed.png",
+    "greenhouse.png",
+    "watering-can.png",
+    "scarecrow.png",
+    "birdhouse.png",
+    "cat.png",
+    "beehive.png",
+  ]) {
+    const image = await readFile(new URL(`../public/assets/garden/${asset}`, import.meta.url));
+    assert.ok(image.length > 100, `${asset} should be a real PNG asset`);
+  }
+});

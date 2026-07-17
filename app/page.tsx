@@ -1,6 +1,6 @@
 "use client";
 
-import { DragEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 
 const quickPrompts = [
   "오늘 회의 내용을 정리해줘",
@@ -38,27 +38,64 @@ const subscriptionPlans = [
   { name: "Studio", price: "239,000", credits: "60,000", cost: "약 $115", description: "크리에이터 집중 사용", examples: "대량 에이전트 작업 · 영상 제작" },
 ];
 
+const grassShop = [
+  { id: "grass-sage", name: "새싹 잔디", asset: "/assets/garden/grass-sage.png", connectedAsset: "/assets/garden/grass-sage-connected.png", cost: 45, color: "#90b65a" },
+  { id: "grass-clover", name: "클로버 잔디", asset: "/assets/garden/grass-clover.png", connectedAsset: "/assets/garden/grass-clover-connected.png", cost: 55, color: "#68a75c" },
+  { id: "grass-mint", name: "민트 잔디", asset: "/assets/garden/grass-mint.png", connectedAsset: "/assets/garden/grass-mint-connected.png", cost: 65, color: "#8ebd83" },
+] as const;
+
 const gardenShop = [
-  { id: "grass", name: "잔디 한 칸", asset: "/assets/garden/grass.png", cost: 90, unlockAt: 0, repeatable: true, defaultCell: 0 },
-  { id: "stone", name: "돌길", asset: "/assets/garden/stone.png", cost: 280, unlockAt: 0, repeatable: false, defaultCell: 15 },
-  { id: "pot", name: "파란 화분", asset: "/assets/garden/pot.png", cost: 420, unlockAt: 0, repeatable: false, defaultCell: 4 },
-  { id: "flower", name: "노란 들꽃", asset: "/assets/garden/flower.png", cost: 560, unlockAt: 2, repeatable: false, defaultCell: 19 },
-  { id: "lamp", name: "정원등", asset: "/assets/garden/lamp.png", cost: 760, unlockAt: 4, repeatable: false, defaultCell: 5 },
-  { id: "fence", name: "나무 울타리", asset: "/assets/garden/fence.png", cost: 880, unlockAt: 6, repeatable: false, defaultCell: 9 },
-  { id: "mushroom", name: "버섯 무리", asset: "/assets/garden/mushroom.png", cost: 960, unlockAt: 8, repeatable: false, defaultCell: 1 },
-  { id: "bench", name: "작은 벤치", asset: "/assets/garden/bench.png", cost: 1100, unlockAt: 10, repeatable: false, defaultCell: 16 },
-  { id: "mailbox", name: "우체통", asset: "/assets/garden/mailbox.png", cost: 1280, unlockAt: 12, repeatable: false, defaultCell: 3 },
-  { id: "pond", name: "미니 연못", asset: "/assets/garden/pond.png", cost: 1480, unlockAt: 16, repeatable: false, defaultCell: 18 },
-  { id: "birdbath", name: "새 물그릇", asset: "/assets/garden/birdbath.png", cost: 1680, unlockAt: 20, repeatable: false, defaultCell: 10 },
-  { id: "picnic", name: "피크닉 매트", asset: "/assets/garden/picnic.png", cost: 1900, unlockAt: 24, repeatable: false, defaultCell: 17 },
-  { id: "arch", name: "덩굴 아치", asset: "/assets/garden/arch.png", cost: 2200, unlockAt: 30, repeatable: false, defaultCell: 2 },
-];
+  { id: "stone", name: "돌길", asset: "/assets/garden/stone.png", cost: 280, unlockAt: 0, category: "장식", size: "small" },
+  { id: "pot", name: "파란 화분", asset: "/assets/garden/pot.png", cost: 420, unlockAt: 0, category: "장식", size: "small" },
+  { id: "flower", name: "노란 들꽃", asset: "/assets/garden/flower.png", cost: 360, unlockAt: 0, category: "꽃", size: "small" },
+  { id: "sunflower", name: "해바라기", asset: "/assets/garden/sunflower.png", cost: 480, unlockAt: 0, category: "꽃", size: "small" },
+  { id: "hydrangea", name: "수국", asset: "/assets/garden/hydrangea.png", cost: 620, unlockAt: 0, category: "꽃", size: "small" },
+  { id: "watering-can", name: "물뿌리개", asset: "/assets/garden/watering-can.png", cost: 390, unlockAt: 0, category: "도구", size: "small" },
+  { id: "lamp", name: "정원등", asset: "/assets/garden/lamp.png", cost: 760, unlockAt: 4, category: "장식", size: "small" },
+  { id: "fence", name: "나무 울타리", asset: "/assets/garden/fence.png", cost: 520, unlockAt: 4, category: "장식", size: "small" },
+  { id: "mushroom", name: "버섯 무리", asset: "/assets/garden/mushroom.png", cost: 680, unlockAt: 5, category: "꽃", size: "small" },
+  { id: "stump", name: "나무 그루터기", asset: "/assets/garden/stump.png", cost: 740, unlockAt: 6, category: "장식", size: "small" },
+  { id: "rocks", name: "둥근 바위", asset: "/assets/garden/rocks.png", cost: 720, unlockAt: 6, category: "장식", size: "small" },
+  { id: "bench", name: "작은 벤치", asset: "/assets/garden/bench.png", cost: 980, unlockAt: 8, category: "장식", size: "medium" },
+  { id: "mailbox", name: "우체통", asset: "/assets/garden/mailbox.png", cost: 860, unlockAt: 8, category: "장식", size: "small" },
+  { id: "birdhouse", name: "새집", asset: "/assets/garden/birdhouse.png", cost: 940, unlockAt: 9, category: "장식", size: "small" },
+  { id: "birdbath", name: "새 물그릇", asset: "/assets/garden/birdbath.png", cost: 1100, unlockAt: 10, category: "장식", size: "small" },
+  { id: "cat", name: "정원 고양이", asset: "/assets/garden/cat.png", cost: 1280, unlockAt: 10, category: "친구", size: "small" },
+  { id: "beehive", name: "작은 벌통", asset: "/assets/garden/beehive.png", cost: 1380, unlockAt: 12, category: "장식", size: "small" },
+  { id: "pond", name: "미니 연못", asset: "/assets/garden/pond.png", cost: 1480, unlockAt: 12, category: "장식", size: "large" },
+  { id: "fountain", name: "돌 분수", asset: "/assets/garden/fountain.png", cost: 1650, unlockAt: 14, category: "장식", size: "medium" },
+  { id: "picnic", name: "피크닉 매트", asset: "/assets/garden/picnic.png", cost: 1500, unlockAt: 14, category: "장식", size: "large" },
+  { id: "wheelbarrow", name: "꽃 수레", asset: "/assets/garden/wheelbarrow.png", cost: 1720, unlockAt: 16, category: "도구", size: "medium" },
+  { id: "arch", name: "덩굴 아치", asset: "/assets/garden/arch.png", cost: 1900, unlockAt: 18, category: "장식", size: "medium" },
+  { id: "vegetable-bed", name: "채소 텃밭", asset: "/assets/garden/vegetable-bed.png", cost: 1150, unlockAt: 0, category: "텃밭", size: "large", requiresFullLawn: true },
+  { id: "tomato-bed", name: "토마토 텃밭", asset: "/assets/garden/tomato-bed.png", cost: 1280, unlockAt: 0, category: "텃밭", size: "large", requiresFullLawn: true },
+  { id: "herb-bed", name: "허브 텃밭", asset: "/assets/garden/herb-bed.png", cost: 1320, unlockAt: 0, category: "텃밭", size: "large", requiresFullLawn: true },
+  { id: "scarecrow", name: "허수아비", asset: "/assets/garden/scarecrow.png", cost: 1480, unlockAt: 0, category: "텃밭", size: "medium", requiresFullLawn: true },
+  { id: "greenhouse", name: "미니 온실", asset: "/assets/garden/greenhouse.png", cost: 2400, unlockAt: 0, category: "텃밭", size: "large", requiresFullLawn: true },
+] as const;
 
 const treeStages = ["씨앗", "새싹", "어린 나무", "큰 나무"];
-const treeAssets = treeStages.map((_, index) => `/assets/terracotta-stage-${index}.png`);
+const treeVarieties = [
+  { id: "default", name: "기본 숲나무", description: "초록 잎과 테라코타 열매", cost: 0, assets: treeStages.map((_, index) => `/assets/terracotta-stage-${index}.png`) },
+  { id: "cherry", name: "벚꽃나무", description: "자랄수록 분홍 꽃이 풍성해져요", cost: 3600, assets: treeStages.map((_, index) => `/assets/terracotta-cherry-${index}.png`) },
+  { id: "sunny", name: "노란 꽃나무", description: "햇빛 같은 노란 꽃이 피어요", cost: 3200, assets: treeStages.map((_, index) => `/assets/terracotta-sunny-${index}.png`) },
+  { id: "lavender", name: "라벤더 꽃나무", description: "차분한 보랏빛 꽃으로 자라요", cost: 3400, assets: treeStages.map((_, index) => `/assets/terracotta-lavender-${index}.png`) },
+] as const;
 
 type Message = { role: "user" | "assistant"; text: string; models?: string };
-type GardenPlacement = { instanceId: string; itemId: string; cell: number };
+type GardenPosition = { x: number; y: number };
+type GroundTile = { cell: number; grassId: string };
+type GardenPlacement = GardenPosition & { instanceId: string; itemId: string };
+type GardenDrag = {
+  kind: "decoration" | "character";
+  id: string;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
+};
 type McpTool = { name?: string; description?: string };
 type McpConnection = {
   id: string;
@@ -98,12 +135,16 @@ export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isWorking, setIsWorking] = useState(false);
-  const [sparks, setSparks] = useState(2480);
+  const [sparks, setSparks] = useState(100000);
   const [growth, setGrowth] = useState(0);
-  const [ownedItems, setOwnedItems] = useState<string[]>([]);
-  const [placements, setPlacements] = useState<GardenPlacement[]>([]);
-  const [draggedPlacement, setDraggedPlacement] = useState<string | null>(null);
-  const [selectedPlacement, setSelectedPlacement] = useState<string | null>(null);
+  const [groundTiles, setGroundTiles] = useState<GroundTile[]>([]);
+  const [decorations, setDecorations] = useState<GardenPlacement[]>([]);
+  const [characterPosition, setCharacterPosition] = useState<GardenPosition>({ x: 50, y: 50 });
+  const [treeVariety, setTreeVariety] = useState("default");
+  const [ownedTrees, setOwnedTrees] = useState<string[]>(["default"]);
+  const [gardenDrag, setGardenDrag] = useState<GardenDrag | null>(null);
+  const [activeGardenItem, setActiveGardenItem] = useState("character");
+  const [shopCategory, setShopCategory] = useState("전체");
   const [gardenOpen, setGardenOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
@@ -122,6 +163,7 @@ export default function Home() {
   const [mobileMenu, setMobileMenu] = useState(false);
   const [ready, setReady] = useState(false);
   const [gardenNote, setGardenNote] = useState("정원은 아직 비어 있어요. 스토어에서 첫 잔디를 심어보세요.");
+  const gardenCanvasRef = useRef<HTMLDivElement>(null);
 
   /* eslint-disable react-hooks/set-state-in-effect -- browser-persisted owner preferences hydrate once after mount */
   useEffect(() => {
@@ -129,22 +171,52 @@ export default function Home() {
     if (savedPreference === "latest" || savedPreference === "gpt" || savedPreference === "claude") {
       setModelPreference(savedPreference);
     }
-    const saved = window.localStorage.getItem("terracotta-garden-v2");
+    const saved = window.localStorage.getItem("terracotta-garden-v3");
+    const previous = window.localStorage.getItem("terracotta-garden-v2");
     const legacy = window.localStorage.getItem("terracotta-garden") ?? window.localStorage.getItem("orbit-simple-garden");
     if (saved) {
       try {
-        const data = JSON.parse(saved) as { ownedItems?: string[]; placements?: GardenPlacement[]; sparks?: number; growth?: number };
-        if (Array.isArray(data.ownedItems)) setOwnedItems(data.ownedItems);
-        if (Array.isArray(data.placements)) setPlacements(data.placements.filter((item) => item.cell >= 0 && item.cell < 20));
+        const data = JSON.parse(saved) as {
+          groundTiles?: GroundTile[];
+          decorations?: GardenPlacement[];
+          characterPosition?: GardenPosition;
+          treeVariety?: string;
+          ownedTrees?: string[];
+          sparks?: number;
+          growth?: number;
+        };
+        if (Array.isArray(data.groundTiles)) setGroundTiles(data.groundTiles.filter((item) => item.cell >= 0 && item.cell < 20));
+        if (Array.isArray(data.decorations)) setDecorations(data.decorations.filter((item) => Number.isFinite(item.x) && Number.isFinite(item.y)));
+        if (data.characterPosition && Number.isFinite(data.characterPosition.x) && Number.isFinite(data.characterPosition.y)) setCharacterPosition(data.characterPosition);
+        if (typeof data.treeVariety === "string" && treeVarieties.some((item) => item.id === data.treeVariety)) setTreeVariety(data.treeVariety);
+        if (Array.isArray(data.ownedTrees)) setOwnedTrees(Array.from(new Set(["default", ...data.ownedTrees])));
         if (typeof data.sparks === "number") setSparks(data.sparks);
         if (typeof data.growth === "number") setGrowth(data.growth);
+      } catch { /* 새 정원으로 시작합니다. */ }
+    } else if (previous) {
+      try {
+        type PreviousPlacement = { instanceId: string; itemId: string; cell: number };
+        const data = JSON.parse(previous) as { placements?: PreviousPlacement[]; sparks?: number; growth?: number };
+        const oldPlacements = Array.isArray(data.placements) ? data.placements : [];
+        setGroundTiles(oldPlacements.filter((item) => item.itemId === "grass").map((item) => ({ cell: item.cell, grassId: "grass-sage" })));
+        setDecorations(oldPlacements.filter((item) => item.itemId !== "grass").map((item) => ({
+          instanceId: item.instanceId,
+          itemId: item.itemId,
+          x: 10 + (item.cell % 5) * 20,
+          y: 14 + Math.floor(item.cell / 5) * 24,
+        })));
+        if (typeof data.sparks === "number") setSparks(Math.max(100000, data.sparks + 100000));
+        if (typeof data.growth === "number") setGrowth(data.growth);
+        setGardenNote("샘플 Sparks 100,000개를 넣어드렸어요. 자유롭게 드래그해 보세요.");
       } catch { /* 새 정원으로 시작합니다. */ }
     } else if (legacy) {
       try {
         const data = JSON.parse(legacy) as { sparks?: number; growth?: number };
-        if (typeof data.sparks === "number") setSparks(data.sparks);
+        if (typeof data.sparks === "number") setSparks(Math.max(100000, data.sparks + 100000));
         if (typeof data.growth === "number") setGrowth(data.growth);
       } catch { /* 사용량만 새 정원으로 옮깁니다. */ }
+    } else {
+      setGardenNote("테스트용 Sparks 100,000개를 준비했어요. 잔디부터 한 칸씩 심어보세요.");
     }
     const params = new URLSearchParams(window.location.search);
     const mcpResult = params.get("mcp");
@@ -163,8 +235,16 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready) return;
-    window.localStorage.setItem("terracotta-garden-v2", JSON.stringify({ ownedItems, placements, sparks, growth }));
-  }, [growth, ownedItems, placements, ready, sparks]);
+    window.localStorage.setItem("terracotta-garden-v3", JSON.stringify({
+      groundTiles,
+      decorations,
+      characterPosition,
+      treeVariety,
+      ownedTrees,
+      sparks,
+      growth,
+    }));
+  }, [characterPosition, decorations, groundTiles, growth, ownedTrees, ready, sparks, treeVariety]);
 
   useEffect(() => {
     if (!ready) return;
@@ -299,8 +379,13 @@ export default function Home() {
   const usageLevel = 12 + growth;
   const treeStage = Math.min(3, Math.floor(usageLevel / 12));
   const nextTreeAt = treeStage === 3 ? null : (treeStage + 1) * 12;
-  const grassCells = useMemo(() => new Set(placements.filter((item) => item.itemId === "grass").map((item) => item.cell)), [placements]);
-  const grassCount = grassCells.size;
+  const selectedTree = treeVarieties.find((item) => item.id === treeVariety) ?? treeVarieties[0];
+  const treeAssets = selectedTree.assets;
+  const groundByCell = useMemo(() => new Map(groundTiles.map((item) => [item.cell, item.grassId])), [groundTiles]);
+  const fullLawnGrassId = groundTiles.length === 20 && groundTiles.every((tile) => tile.grassId === groundTiles[0]?.grassId) ? groundTiles[0].grassId : null;
+  const fullLawn = grassShop.find((item) => item.id === fullLawnGrassId) ?? null;
+  const gardenCategories = useMemo(() => ["전체", ...Array.from(new Set(gardenShop.map((item) => item.category)))], []);
+  const visibleGardenItems = useMemo(() => gardenShop.filter((item) => shopCategory === "전체" || item.category === shopCategory), [shopCategory]);
   const mcpCategories = useMemo(() => ["전체", ...Array.from(new Set(mcpConnections.map((item) => item.category)))], [mcpConnections]);
   const visibleMcpConnections = useMemo(() => {
     const query = mcpQuery.trim().toLowerCase();
@@ -347,75 +432,117 @@ export default function Home() {
     }
   }
 
-  function nextOpenCell(itemId: string, preferredCell: number) {
-    const occupied = new Set(placements.filter((item) => itemId === "grass" ? item.itemId === "grass" : item.itemId !== "grass").map((item) => item.cell));
-    if (!occupied.has(preferredCell)) return preferredCell;
-    return Array.from({ length: 20 }, (_, index) => index).find((cell) => !occupied.has(cell)) ?? null;
+  function plantGrass(item: (typeof grassShop)[number]) {
+    if (groundTiles.length >= 20) {
+      setGardenNote(fullLawn ? `${fullLawn.name} 한 판이 완성됐어요. 이제 텃밭 아이템을 놓을 수 있어요.` : "지면 20칸이 찼어요. 같은 색으로 연결하려면 잔디를 걷어내고 한 종류로 다시 심어보세요.");
+      return;
+    }
+    if (sparks < item.cost) {
+      setGardenNote(`${item.name}을 심으려면 ${item.cost - sparks} Sparks가 더 필요해요.`);
+      return;
+    }
+    const plantingOrder = [12, 7, 11, 13, 17, 6, 8, 16, 18, 2, 10, 14, 22, 1, 3, 5, 9, 15, 19, 0, 4];
+    const nextCell = plantingOrder.find((cell) => cell < 20 && !groundByCell.has(cell));
+    if (nextCell === undefined) return;
+    const nextTiles = [...groundTiles, { cell: nextCell, grassId: item.id }];
+    setGroundTiles(nextTiles);
+    setSparks((value) => value - item.cost);
+    const completed = nextTiles.length === 20 && nextTiles.every((tile) => tile.grassId === item.id);
+    setGardenNote(completed ? `${item.name} 20칸이 이어져 한 판이 됐어요. 텃밭 상점이 열렸습니다.` : `${item.name}을 한 칸 심었어요. 같은 잔디 ${nextTiles.filter((tile) => tile.grassId === item.id).length}/20`);
   }
 
   function buyItem(item: (typeof gardenShop)[number]) {
-    if (!item.repeatable && ownedItems.includes(item.id)) return;
-    if (item.id === "grass" && grassCount >= 20) {
-      setGardenNote("20칸에 잔디를 모두 심었어요. 잔디를 드래그해 자리를 바꿀 수 있어요.");
-      return;
-    }
     if (usageLevel < item.unlockAt) {
       setGardenNote(`${item.name}은 사용량 ${item.unlockAt}부터 잠금 해제돼요.`);
+      return;
+    }
+    if ("requiresFullLawn" in item && item.requiresFullLawn && !fullLawn) {
+      setGardenNote(`${item.name}은 같은 색 잔디 20칸을 이어 한 판으로 만들면 살 수 있어요.`);
       return;
     }
     if (sparks < item.cost) {
       setGardenNote(`${item.name}을 놓으려면 ${item.cost - sparks} Sparks가 더 필요해요.`);
       return;
     }
-
-    const cell = nextOpenCell(item.id, item.defaultCell);
-    if (cell === null) {
-      setGardenNote("비어 있는 칸이 없어요. 아이템을 옮긴 뒤 다시 놓아보세요.");
-      return;
-    }
-
-    const instanceId = item.repeatable ? `grass-${Date.now()}-${placements.length}` : item.id;
-    if (!item.repeatable) setOwnedItems((items) => [...items, item.id]);
-    setPlacements((items) => [...items, { instanceId, itemId: item.id, cell }]);
+    const instanceId = `${item.id}-${Date.now()}-${decorations.length}`;
+    const dropSlots = [
+      { x: 24, y: 70 }, { x: 76, y: 68 }, { x: 20, y: 35 }, { x: 80, y: 34 },
+      { x: 35, y: 80 }, { x: 65, y: 82 }, { x: 12, y: 55 }, { x: 88, y: 55 },
+    ];
+    const position = dropSlots[decorations.length % dropSlots.length];
+    setDecorations((items) => [...items, { instanceId, itemId: item.id, ...position }]);
     setSparks((value) => value - item.cost);
-    setGardenNote(`${item.name}을 놓았어요. 마우스로 원하는 칸에 옮겨보세요.`);
+    setActiveGardenItem(instanceId);
+    setGardenNote(`${item.name}을 놓았어요. 타일 경계 없이 원하는 위치로 끌어보세요.`);
   }
 
-  function movePlacement(instanceId: string, targetCell: number) {
-    setPlacements((items) => {
-      const moving = items.find((item) => item.instanceId === instanceId);
-      if (!moving || moving.cell === targetCell) return items;
+  function clearLawn() {
+    setGroundTiles([]);
+    setGardenNote("잔디를 걷어냈어요. 원하는 색을 골라 다시 한 칸씩 심을 수 있어요.");
+  }
 
-      if (moving.itemId === "grass") {
-        const occupying = items.find((item) => item.itemId === "grass" && item.cell === targetCell);
-        return items.map((item) => {
-          if (item.instanceId === moving.instanceId) return { ...item, cell: targetCell };
-          if (occupying && item.instanceId === occupying.instanceId) return { ...item, cell: moving.cell };
-          return item;
-        });
+  function chooseTree(item: (typeof treeVarieties)[number]) {
+    if (!ownedTrees.includes(item.id)) {
+      if (sparks < item.cost) {
+        setGardenNote(`${item.name}을 키우려면 ${item.cost - sparks} Sparks가 더 필요해요.`);
+        return;
       }
-
-      return items.map((item) => item.instanceId === instanceId ? { ...item, cell: targetCell } : item);
-    });
-    setSelectedPlacement(null);
-    setDraggedPlacement(null);
-    setGardenNote("새 위치를 저장했어요.");
+      setOwnedTrees((items) => [...items, item.id]);
+      setSparks((value) => value - item.cost);
+    }
+    setTreeVariety(item.id);
+    setActiveGardenItem("character");
+    setGardenNote(`${item.name}으로 성장 방향을 바꿨어요. 현재 사용량 단계는 그대로 이어집니다.`);
   }
 
-  function handleDragStart(event: DragEvent<HTMLButtonElement>, instanceId: string) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", instanceId);
-    setDraggedPlacement(instanceId);
-  }
-
-  function handleDrop(event: DragEvent<HTMLButtonElement>, cell: number) {
+  function startGardenDrag(event: ReactPointerEvent<HTMLButtonElement>, kind: GardenDrag["kind"], id: string, position: GardenPosition) {
     event.preventDefault();
-    const instanceId = event.dataTransfer.getData("text/plain") || draggedPlacement;
-    if (instanceId) movePlacement(instanceId, cell);
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setActiveGardenItem(id);
+    setGardenDrag({
+      kind,
+      id,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startX: position.x,
+      startY: position.y,
+      moved: false,
+    });
   }
 
-  function gridPosition(cell: number) {
-    return { gridColumn: (cell % 5) + 1, gridRow: Math.floor(cell / 5) + 1 };
+  function handleGardenPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!gardenDrag || gardenDrag.pointerId !== event.pointerId || !gardenCanvasRef.current) return;
+    const bounds = gardenCanvasRef.current.getBoundingClientRect();
+    const x = Math.min(95, Math.max(5, gardenDrag.startX + ((event.clientX - gardenDrag.startClientX) / bounds.width) * 100));
+    const y = Math.min(92, Math.max(8, gardenDrag.startY + ((event.clientY - gardenDrag.startClientY) / bounds.height) * 100));
+    if (gardenDrag.kind === "character") setCharacterPosition({ x, y });
+    else setDecorations((items) => items.map((item) => item.instanceId === gardenDrag.id ? { ...item, x, y } : item));
+    if (!gardenDrag.moved && Math.hypot(event.clientX - gardenDrag.startClientX, event.clientY - gardenDrag.startClientY) > 3) {
+      setGardenDrag((current) => current ? { ...current, moved: true } : null);
+    }
+  }
+
+  function finishGardenDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!gardenDrag || gardenDrag.pointerId !== event.pointerId) return;
+    if (gardenDrag.moved) setGardenNote(gardenDrag.kind === "character" ? "테라 캐릭터 위치를 저장했어요." : "장식 위치를 자유 좌표로 저장했어요.");
+    setGardenDrag(null);
+  }
+
+  function moveGardenItemWithKeyboard(event: KeyboardEvent<HTMLButtonElement>, kind: GardenDrag["kind"], id: string) {
+    const delta = event.shiftKey ? 5 : 2;
+    const offset = event.key === "ArrowLeft" ? { x: -delta, y: 0 } : event.key === "ArrowRight" ? { x: delta, y: 0 } : event.key === "ArrowUp" ? { x: 0, y: -delta } : event.key === "ArrowDown" ? { x: 0, y: delta } : null;
+    if (!offset) return;
+    event.preventDefault();
+    const move = (position: GardenPosition) => ({ x: Math.min(95, Math.max(5, position.x + offset.x)), y: Math.min(92, Math.max(8, position.y + offset.y)) });
+    if (kind === "character") setCharacterPosition((position) => move(position));
+    else setDecorations((items) => items.map((item) => item.instanceId === id ? { ...item, ...move(item) } : item));
+    setActiveGardenItem(id);
+  }
+
+  function gardenPositionStyle(position: GardenPosition) {
+    return { left: `${position.x}%`, top: `${position.y}%`, zIndex: Math.round(20 + position.y) };
   }
 
   function newChat() {
@@ -526,21 +653,24 @@ export default function Home() {
 
       <aside className="garden-rail" aria-label="테라코타 가든">
         <div className="garden-rail-head">
-          <div><b>테라코타 가든</b><span><i /> {treeStages[treeStage]} · 사용량 {usageLevel}</span></div>
+          <div><b>테라코타 가든</b><span><i /> {selectedTree.name} · {treeStages[treeStage]}</span></div>
           <button onClick={() => setGardenOpen(true)} aria-label="가든 크게 보기">↗</button>
         </div>
         <button className="pixel-garden" onClick={() => setGardenOpen(true)} aria-label="가든 열기">
-          <div className="garden-grid">
-            {Array.from({ length: 20 }, (_, index) => <i key={index} className={grassCells.has(index) ? "has-grass" : ""} />)}
-            {placements.filter((placement) => placement.itemId !== "grass").map((placement) => {
-              const item = gardenShop.find((entry) => entry.id === placement.itemId);
-              return item ? <img key={placement.instanceId} className="mini-garden-item" style={gridPosition(placement.cell)} src={item.asset} alt="" draggable={false} /> : null;
+          <div className={`garden-ground-grid mini ${fullLawn ? "connected" : ""}`}>
+            {Array.from({ length: 20 }, (_, index) => {
+              const grass = grassShop.find((item) => item.id === groundByCell.get(index));
+              return <i key={index} className={grass ? "has-grass" : ""} style={grass ? { backgroundImage: `url(${fullLawn ? grass.connectedAsset : grass.asset})` } : undefined} />;
             })}
           </div>
-          <div className="garden-mascot"><img src={treeAssets[treeStage]} alt={`${treeStages[treeStage]} 단계의 테라코타 캐릭터`} /></div>
+          {decorations.map((placement) => {
+              const item = gardenShop.find((entry) => entry.id === placement.itemId);
+              return item ? <img key={placement.instanceId} className={`mini-free-item size-${item.size}`} style={gardenPositionStyle(placement)} src={item.asset} alt="" draggable={false} /> : null;
+          })}
+          <img className="mini-character" style={gardenPositionStyle(characterPosition)} src={treeAssets[treeStage]} alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
         </button>
         <div className="garden-rail-foot">
-          <span>지식 {128 + growth}개</span>
+          <span>{fullLawn ? "잔디 한 판 완성" : `잔디 ${groundTiles.length}/20`}</span>
           <button onClick={() => setGardenOpen(true)}>가꾸기</button>
         </div>
       </aside>
@@ -550,66 +680,105 @@ export default function Home() {
           <section className="dialog garden-dialog" role="dialog" aria-modal="true" aria-label="테라코타 가든" onMouseDown={(event) => event.stopPropagation()}>
             <button className="dialog-close" onClick={() => setGardenOpen(false)} aria-label="닫기">×</button>
             <header><p>Terracotta Garden</p><h2>내 지식 정원</h2><span>{gardenNote}</span></header>
-            <p className="drag-help">아이템을 마우스로 끌어 원하는 칸에 놓으세요. 클릭한 뒤 빈 칸을 눌러도 이동합니다.</p>
-            <div className="large-garden">
-              {Array.from({ length: 20 }, (_, index) => {
-                const grassPlacement = placements.find((placement) => placement.itemId === "grass" && placement.cell === index);
-                const selected = grassPlacement?.instanceId === selectedPlacement;
-                return (
-                  <button
-                    type="button"
-                    key={index}
-                    className={`garden-cell ${grassPlacement ? "has-grass" : ""} ${selected ? "selected" : ""}`}
-                    draggable={Boolean(grassPlacement)}
-                    onDragStart={(event) => grassPlacement && handleDragStart(event, grassPlacement.instanceId)}
-                    onDragEnd={() => setDraggedPlacement(null)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => handleDrop(event, index)}
-                    onClick={() => {
-                      if (selectedPlacement) movePlacement(selectedPlacement, index);
-                      else if (grassPlacement) setSelectedPlacement(grassPlacement.instanceId);
-                    }}
-                    aria-label={`${Math.floor(index / 5) + 1}행 ${(index % 5) + 1}열${grassPlacement ? " 잔디" : " 빈 흙"}`}
-                  />
-                );
-              })}
-              <div className="large-mascot"><img src={treeAssets[treeStage]} alt={`${treeStages[treeStage]} 단계의 테라코타 캐릭터`} /></div>
-              {placements.filter((placement) => placement.itemId !== "grass").map((placement) => {
+            <p className="drag-help">잔디는 지면에 한 칸씩 심고, 장식과 테라 캐릭터는 타일과 상관없이 어디든 자유롭게 끌 수 있어요. 방향키로도 미세 조정됩니다.</p>
+            <div
+              ref={gardenCanvasRef}
+              className={`large-garden ${gardenDrag ? "dragging" : ""}`}
+              onPointerMove={handleGardenPointerMove}
+              onPointerUp={finishGardenDrag}
+              onPointerCancel={finishGardenDrag}
+            >
+              <div className={`garden-ground-grid large ${fullLawn ? "connected" : ""}`} aria-label="5×4 잔디 지면">
+                {Array.from({ length: 20 }, (_, index) => {
+                  const grass = grassShop.find((item) => item.id === groundByCell.get(index));
+                  return <i key={index} className={grass ? "has-grass" : ""} style={grass ? { backgroundImage: `url(${fullLawn ? grass.connectedAsset : grass.asset})` } : undefined} aria-label={`${index + 1}번째 ${grass?.name ?? "흙"}`} />;
+                })}
+              </div>
+              {decorations.map((placement) => {
                 const item = gardenShop.find((entry) => entry.id === placement.itemId);
                 if (!item) return null;
                 return (
                   <button
                     type="button"
                     key={placement.instanceId}
-                    className={`movable-garden-item ${selectedPlacement === placement.instanceId ? "selected" : ""}`}
-                    style={gridPosition(placement.cell)}
-                    draggable
-                    onDragStart={(event) => handleDragStart(event, placement.instanceId)}
-                    onDragEnd={() => setDraggedPlacement(null)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => handleDrop(event, placement.cell)}
-                    onClick={() => setSelectedPlacement(placement.instanceId)}
-                    aria-label={`${item.name} 위치 옮기기`}
+                    className={`free-garden-item size-${item.size} ${activeGardenItem === placement.instanceId ? "selected" : ""}`}
+                    style={gardenPositionStyle(placement)}
+                    onPointerDown={(event) => startGardenDrag(event, "decoration", placement.instanceId, placement)}
+                    onKeyDown={(event) => moveGardenItemWithKeyboard(event, "decoration", placement.instanceId)}
+                    aria-label={`${item.name} 자유롭게 옮기기`}
                   >
                     <img src={item.asset} alt="" draggable={false} />
                   </button>
                 );
               })}
+              <button
+                type="button"
+                className={`garden-character ${activeGardenItem === "character" ? "selected" : ""}`}
+                style={gardenPositionStyle(characterPosition)}
+                onPointerDown={(event) => startGardenDrag(event, "character", "character", characterPosition)}
+                onKeyDown={(event) => moveGardenItemWithKeyboard(event, "character", "character")}
+                aria-label={`${selectedTree.name} 테라 캐릭터 자유롭게 옮기기`}
+              >
+                <img src={treeAssets[treeStage]} alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
+              </button>
+              <span className="free-drag-badge">자유 배치 · 1% 단위 저장</span>
             </div>
             <div className="garden-meta"><span><b>{treeStages[treeStage]}</b>{nextTreeAt ? `다음 성장까지 ${nextTreeAt - usageLevel}` : "모두 자랐어요"}</span><span><b>{usageLevel}</b> 누적 사용량</span><span><b>{sparks.toLocaleString()}</b> Sparks</span></div>
+            <div className="sample-credit"><span>TEST</span><b>샘플 Sparks가 넉넉히 들어있어요.</b><small>아이템과 나무를 마음껏 구매해 드래그를 확인해 보세요.</small></div>
+
+            <div className="shop-heading lawn-heading">
+              <div><h3>잔디 심기</h3><p>같은 색 20칸을 채우면 경계가 사라지고 하나의 잔디밭으로 이어져요.</p></div>
+              <button type="button" onClick={clearLawn} disabled={groundTiles.length === 0}>잔디 걷어내기</button>
+            </div>
+            <div className="lawn-shop">
+              {grassShop.map((item) => {
+                const count = groundTiles.filter((tile) => tile.grassId === item.id).length;
+                return (
+                  <button type="button" key={item.id} onClick={() => plantGrass(item)} disabled={groundTiles.length >= 20 || sparks < item.cost}>
+                    <span className="lawn-swatch" style={{ backgroundImage: `url(${item.asset})`, borderColor: item.color }} />
+                    <b>{item.name}</b><small>{count}/20 · 한 칸 {item.cost} S</small>
+                  </button>
+                );
+              })}
+              <span className={`lawn-progress ${fullLawn ? "complete" : ""}`}><b>{groundTiles.length}/20</b>{fullLawn ? `${fullLawn.name} 한 판 완성` : "같은 색으로 채우면 텃밭 해금"}</span>
+            </div>
+
             <div className="shop-heading">
-              <div><h3>가드닝 스토어</h3><p>나무는 살 수 없어요. 사용할수록 스스로 자랍니다.</p></div>
+              <div><h3>가드닝 스토어</h3><p>모든 장식은 여러 개 살 수 있고 잔디 위에서 자유롭게 겹쳐 놓을 수 있어요.</p></div>
               <span>{gardenShop.filter((item) => usageLevel >= item.unlockAt).length}/{gardenShop.length} 아이템 해금</span>
             </div>
+            <div className="garden-shop-tabs" role="tablist" aria-label="가드닝 아이템 카테고리">
+              {gardenCategories.map((category) => <button type="button" role="tab" aria-selected={shopCategory === category} className={shopCategory === category ? "active" : ""} key={category} onClick={() => setShopCategory(category)}>{category}</button>)}
+            </div>
             <div className="simple-shop">
-              {gardenShop.map((item) => {
-                const owned = !item.repeatable && ownedItems.includes(item.id);
+              {visibleGardenItems.map((item) => {
                 const locked = usageLevel < item.unlockAt;
-                const soldOut = item.id === "grass" && grassCount >= 20;
+                const lawnLocked = "requiresFullLawn" in item && item.requiresFullLawn && !fullLawn;
+                const count = decorations.filter((placement) => placement.itemId === item.id).length;
                 return (
-                  <button key={item.id} className={locked ? "locked" : ""} disabled={owned || soldOut} onClick={() => buyItem(item)}>
-                    <span className="shop-item-preview"><img src={item.asset} alt="" draggable={false} /></span><b>{item.name}</b><small>{owned ? "배치됨" : soldOut ? "20칸 모두 심음" : locked ? `사용량 ${item.unlockAt}에 해금` : item.id === "grass" ? `${grassCount}/20 · ${item.cost} S` : `${item.cost} S`}</small>
+                  <button key={item.id} className={locked || lawnLocked ? "locked" : ""} disabled={locked || lawnLocked || sparks < item.cost} onClick={() => buyItem(item)}>
+                    <span className="shop-item-preview"><img src={item.asset} alt="" draggable={false} /></span><b>{item.name}</b><small>{locked ? `사용량 ${item.unlockAt}에 해금` : lawnLocked ? "잔디 한 판 완성 후 해금" : `${item.cost} S${count ? ` · 보유 ${count}` : ""}`}</small>
                   </button>
+                );
+              })}
+            </div>
+
+            <div className="shop-heading tree-heading">
+              <div><h3>성장 나무 선택</h3><p>품종을 사도 사용량으로 자라는 단계는 유지돼요. 네 단계를 미리 볼 수 있습니다.</p></div>
+              <span>{ownedTrees.length}/{treeVarieties.length} 품종 보유</span>
+            </div>
+            <div className="tree-shop">
+              {treeVarieties.map((item) => {
+                const owned = ownedTrees.includes(item.id);
+                const selected = treeVariety === item.id;
+                return (
+                  <article key={item.id} className={selected ? "selected" : ""}>
+                    <div className="tree-card-title"><div><b>{item.name}</b><small>{item.description}</small></div><span>{selected ? "사용 중" : owned ? "보유" : `${item.cost.toLocaleString()} S`}</span></div>
+                    <div className="tree-stage-preview">
+                      {item.assets.map((asset, index) => <span key={asset} className={treeStage === index ? "current" : ""}><img src={asset} alt={`${item.name} ${treeStages[index]}`} draggable={false} /><small>{treeStages[index]}</small></span>)}
+                    </div>
+                    <button type="button" disabled={selected || (!owned && sparks < item.cost)} onClick={() => chooseTree(item)}>{selected ? "현재 나무" : owned ? "이 나무로 변경" : "구매하고 변경"}</button>
+                  </article>
                 );
               })}
             </div>
