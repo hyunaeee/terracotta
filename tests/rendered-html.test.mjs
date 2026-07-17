@@ -24,9 +24,10 @@ test("keeps the Terracotta identity clean and consistent", async () => {
 });
 
 test("implements a durable, encrypted OAuth MCP hub", async () => {
-  const [hub, page, schema, connectRoute, toolsRoute] = await Promise.all([
+  const [hub, page, css, schema, connectRoute, toolsRoute] = await Promise.all([
     source("lib/mcp-hub.ts"),
     source("app/page.tsx"),
+    source("app/globals.css"),
     source("db/schema.ts"),
     source("app/api/mcp/connect/route.ts"),
     source("app/api/mcp/tools/route.ts"),
@@ -46,10 +47,30 @@ test("implements a durable, encrypted OAuth MCP hub", async () => {
   assert.match(schema, /primaryKey\(\{ columns: \[table\.id, table\.ownerId\] \}\)/);
   assert.match(page, /\/api\/mcp\/connect/);
   assert.match(page, /mcpCategories/);
+  assert.match(page, /function McpBrandMark/);
+  assert.match(page, /mcpBrandAssets/);
+  assert.match(page, /id\.startsWith\("cloudflare-"\)/);
+  assert.match(css, /\.mcp-service-mark img/);
   assert.match(page, /OAuth 앱 키를 암호화해 저장/);
   assert.match(page, /Shopify Storefront/);
   assert.match(connectRoute, /startMcpConnection/);
   assert.match(toolsRoute, /callMcpTool/);
+
+  for (const asset of [
+    "github.svg",
+    "notion.svg",
+    "figma.svg",
+    "google-drive.svg",
+    "slack.png",
+    "canva.png",
+    "cloudflare.svg",
+    "microsoft-learn.png",
+    "exa.png",
+    "context7.png",
+  ]) {
+    const image = await readFile(new URL(`../public/assets/mcp/${asset}`, import.meta.url));
+    assert.ok(image.length > 100, `${asset} should be a real brand asset`);
+  }
 });
 
 test("separates lawn terrain from free-position garden objects", async () => {

@@ -120,6 +120,35 @@ const mcpTemplates = [
   { name: "Azure API Center", url: "https://your-service.data.your-region.azure-apicenter.ms/mcp", note: "서비스·리전 주소로 변경" },
 ];
 
+const mcpBrandAssets: Record<string, string> = {
+  github: "/assets/mcp/github.svg",
+  notion: "/assets/mcp/notion.svg",
+  figma: "/assets/mcp/figma.svg",
+  linear: "/assets/mcp/linear.svg",
+  "google-drive": "/assets/mcp/google-drive.svg",
+  atlassian: "/assets/mcp/atlassian.svg",
+  slack: "/assets/mcp/slack.png",
+  asana: "/assets/mcp/asana.svg",
+  airtable: "/assets/mcp/airtable.svg",
+  canva: "/assets/mcp/canva.png",
+  box: "/assets/mcp/box.svg",
+  stripe: "/assets/mcp/stripe.svg",
+  paypal: "/assets/mcp/paypal.svg",
+  hubspot: "/assets/mcp/hubspot.svg",
+  intercom: "/assets/mcp/intercom.svg",
+  supabase: "/assets/mcp/supabase.svg",
+  vercel: "/assets/mcp/vercel.svg",
+  sentry: "/assets/mcp/sentry.svg",
+  grafana: "/assets/mcp/grafana.svg",
+  cloudflare: "/assets/mcp/cloudflare.svg",
+  gitlab: "/assets/mcp/gitlab.svg",
+  postman: "/assets/mcp/postman.svg",
+  "microsoft-learn": "/assets/mcp/microsoft-learn.png",
+  "hugging-face": "/assets/mcp/hugging-face.svg",
+  exa: "/assets/mcp/exa.png",
+  context7: "/assets/mcp/context7.png",
+};
+
 function TerracottaMark({ size = "normal" }: { size?: "tiny" | "normal" | "large" }) {
   return (
     <span className={`terracotta-mark ${size}`} aria-hidden="true">
@@ -127,6 +156,16 @@ function TerracottaMark({ size = "normal" }: { size?: "tiny" | "normal" | "large
       <i className="mark-leaf mark-leaf-right" />
       <i className="mark-stem" />
       <i className="mark-pot" />
+    </span>
+  );
+}
+
+function McpBrandMark({ id, name }: { id: string; name: string }) {
+  const brandId = id.startsWith("cloudflare-") ? "cloudflare" : id;
+  const asset = mcpBrandAssets[brandId];
+  return (
+    <span className={`mcp-service-mark ${asset ? "has-brand-logo" : "is-fallback"}`} aria-hidden="true">
+      {asset ? <img src={asset} alt="" draggable={false} /> : name.slice(0, 1).toUpperCase()}
     </span>
   );
 }
@@ -819,7 +858,7 @@ export default function Home() {
                 return (
                   <article className={`mcp-card ${connected ? "connected" : ""}`} key={item.id}>
                     <div className="mcp-card-top">
-                      <span className={`mcp-service-mark service-${item.id.split("-")[0]}`}>{item.name.slice(0, 1).toUpperCase()}</span>
+                      <McpBrandMark id={item.id} name={item.name} />
                       <div><b>{item.name}</b><small>{item.category} · {item.note}</small></div>
                       <em className={connected ? "connected" : failed ? "failed" : ""}>{connected ? `${item.tool_count}개 도구` : authorizing ? "승인 중" : failed ? "확인 필요" : needsApp ? "앱 키 필요" : item.setup === "public" ? "바로 연결" : item.setup === "restricted" ? "공급사 승인형" : "연결 안 됨"}</em>
                     </div>
