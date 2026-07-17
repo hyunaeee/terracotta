@@ -8,6 +8,20 @@
       "when": 1784163393554,
       "tag": "0000_parched_thor_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784258326236,
+      "tag": "0001_loving_hitman",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784258411697,
+      "tag": "0002_gifted_grim_reaper",
+      "breakpoints": true
     }
   ]
 }

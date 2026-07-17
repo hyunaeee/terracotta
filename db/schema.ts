@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const modelRegistry = sqliteTable("model_registry", {
   key: text("key").primaryKey(),
@@ -42,4 +42,40 @@ export const ownerSettings = sqliteTable("owner_settings", {
   ownerId: text("owner_id").primaryKey(),
   modelPreference: text("model_preference").notNull().default("latest"),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const mcpConnections = sqliteTable("mcp_connections", {
+  id: text("id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  name: text("name").notNull(),
+  serverUrl: text("server_url").notNull(),
+  category: text("category").notNull().default("custom"),
+  status: text("status").notNull().default("not_connected"),
+  authType: text("auth_type").notNull().default("oauth"),
+  toolCount: integer("tool_count").notNull().default(0),
+  toolsJson: text("tools_json").notNull().default("[]"),
+  encryptedAccessToken: text("encrypted_access_token"),
+  encryptedRefreshToken: text("encrypted_refresh_token"),
+  tokenExpiresAt: text("token_expires_at"),
+  oauthClientId: text("oauth_client_id"),
+  encryptedClientSecret: text("encrypted_client_secret"),
+  authorizationEndpoint: text("authorization_endpoint"),
+  tokenEndpoint: text("token_endpoint"),
+  resource: text("resource"),
+  scopes: text("scopes"),
+  lastCheckedAt: text("last_checked_at"),
+  error: text("error"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [primaryKey({ columns: [table.id, table.ownerId] })]);
+
+export const mcpOauthStates = sqliteTable("mcp_oauth_states", {
+  state: text("state").primaryKey(),
+  connectionId: text("connection_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  encryptedVerifier: text("encrypted_verifier").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  resource: text("resource").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  expiresAt: text("expires_at").notNull(),
 });

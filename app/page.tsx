@@ -59,6 +59,31 @@ const treeAssets = treeStages.map((_, index) => `/assets/terracotta-stage-${inde
 
 type Message = { role: "user" | "assistant"; text: string; models?: string };
 type GardenPlacement = { instanceId: string; itemId: string; cell: number };
+type McpTool = { name?: string; description?: string };
+type McpConnection = {
+  id: string;
+  name: string;
+  server_url: string;
+  category: string;
+  status: string;
+  auth_type: string;
+  tool_count: number;
+  tools: McpTool[];
+  note: string;
+  last_checked_at: string | null;
+  error: string | null;
+};
+
+function TerracottaMark({ size = "normal" }: { size?: "tiny" | "normal" | "large" }) {
+  return (
+    <span className={`terracotta-mark ${size}`} aria-hidden="true">
+      <i className="mark-leaf mark-leaf-left" />
+      <i className="mark-leaf mark-leaf-right" />
+      <i className="mark-stem" />
+      <i className="mark-pot" />
+    </span>
+  );
+}
 
 export default function Home() {
   const [prompt, setPrompt] = useState("");
@@ -72,6 +97,12 @@ export default function Home() {
   const [selectedPlacement, setSelectedPlacement] = useState<string | null>(null);
   const [gardenOpen, setGardenOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [mcpConnections, setMcpConnections] = useState<McpConnection[]>([]);
+  const [mcpLoading, setMcpLoading] = useState(false);
+  const [mcpBusy, setMcpBusy] = useState<string | null>(null);
+  const [mcpNote, setMcpNote] = useState("공식 서버를 연결하면 테라코타가 필요한 도구를 발견해 사용할 수 있어요.");
+  const [customMcp, setCustomMcp] = useState({ name: "", url: "" });
   const [modelPreference, setModelPreference] = useState<ModelPreference>("latest");
   const [registryStatus, setRegistryStatus] = useState<RegistryStatus | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
@@ -79,6 +110,7 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [gardenNote, setGardenNote] = useState("정원은 아직 비어 있어요. 스토어에서 첫 잔디를 심어보세요.");
 
+  /* eslint-disable react-hooks/set-state-in-effect -- browser-persisted owner preferences hydrate once after mount */
   useEffect(() => {
     const savedPreference = window.localStorage.getItem("terracotta-model-preference");
     if (savedPreference === "latest" || savedPreference === "gpt" || savedPreference === "claude") {
@@ -101,8 +133,20 @@ export default function Home() {
         if (typeof data.growth === "number") setGrowth(data.growth);
       } catch { /* 사용량만 새 정원으로 옮깁니다. */ }
     }
+    const params = new URLSearchParams(window.location.search);
+    const mcpResult = params.get("mcp");
+    if (mcpResult) {
+      setMcpOpen(true);
+      setMcpNote(mcpResult === "connected" ? "연결을 마쳤어요. 사용할 수 있는 도구를 동기화했습니다." : params.get("message") || "MCP 인증을 완료하지 못했어요.");
+      void loadMcp();
+      params.delete("mcp");
+      params.delete("message");
+      const nextQuery = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
+    }
     setReady(true);
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!ready) return;
@@ -128,6 +172,80 @@ export default function Home() {
       setRegistryStatus(await response.json() as RegistryStatus);
     } catch { setRegistryStatus(null); }
     finally { setRegistryLoading(false); }
+  }
+
+  async function loadMcp() {
+    setMcpLoading(true);
+    try {
+      const response = await fetch("/api/mcp", { cache: "no-store" });
+      const payload = await response.json() as { connections?: McpConnection[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || "MCP 연결을 불러오지 못했어요.");
+      setMcpConnections(payload.connections ?? []);
+    } catch (error) {
+      setMcpNote(error instanceof Error ? error.message : "MCP 연결을 불러오지 못했어요.");
+    } finally {
+      setMcpLoading(false);
+    }
+  }
+
+  function openMcpHub() {
+    setMcpOpen(true);
+    setMobileMenu(false);
+    void loadMcp();
+  }
+
+  async function connectMcp(id: string) {
+    setMcpBusy(id);
+    setMcpNote("서버의 인증 방식과 도구를 확인하고 있어요.");
+    try {
+      const response = await fetch("/api/mcp/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const payload = await response.json() as { connected?: boolean; authUrl?: string; toolCount?: number; error?: string };
+      if (!response.ok) throw new Error(payload.error || "MCP 연결을 시작하지 못했어요.");
+      if (payload.authUrl) {
+        window.location.assign(payload.authUrl);
+        return;
+      }
+      setMcpNote(`${payload.toolCount ?? 0}개 도구를 연결했어요.`);
+      await loadMcp();
+    } catch (error) {
+      setMcpNote(error instanceof Error ? error.message : "MCP 연결을 시작하지 못했어요.");
+      await loadMcp();
+    } finally {
+      setMcpBusy(null);
+    }
+  }
+
+  async function addCustomMcp(event: FormEvent) {
+    event.preventDefault();
+    if (!customMcp.url.trim()) return;
+    setMcpBusy("custom");
+    try {
+      const response = await fetch("/api/mcp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(customMcp) });
+      const payload = await response.json() as { id?: string; error?: string };
+      if (!response.ok || !payload.id) throw new Error(payload.error || "서버를 추가하지 못했어요.");
+      setCustomMcp({ name: "", url: "" });
+      setMcpNote("사용자 MCP 서버를 추가했어요. 연결을 눌러 인증해 주세요.");
+      await loadMcp();
+    } catch (error) {
+      setMcpNote(error instanceof Error ? error.message : "서버를 추가하지 못했어요.");
+    } finally {
+      setMcpBusy(null);
+    }
+  }
+
+  async function disconnectMcp(id: string) {
+    setMcpBusy(id);
+    try {
+      const response = await fetch(`/api/mcp?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "연결을 해제하지 못했어요.");
+      setMcpNote("저장된 인증과 도구 목록을 지웠어요.");
+      await loadMcp();
+    } catch (error) {
+      setMcpNote(error instanceof Error ? error.message : "연결을 해제하지 못했어요.");
+    } finally {
+      setMcpBusy(null);
+    }
   }
 
   const routingOrder = useMemo(() => {
@@ -273,7 +391,7 @@ export default function Home() {
       <aside className={`sidebar ${mobileMenu ? "open" : ""}`}>
         <div className="sidebar-top">
           <button className="wordmark" onClick={newChat} aria-label="테라코타 홈">
-            <span className="wordmark-seed" /> Terracotta
+            <TerracottaMark /> Terracotta
           </button>
           <button className="sidebar-close" onClick={() => setMobileMenu(false)} aria-label="메뉴 닫기">×</button>
         </div>
@@ -283,6 +401,7 @@ export default function Home() {
         <nav className="sidebar-nav" aria-label="주요 메뉴">
           <button className="active" onClick={() => setMobileMenu(false)}><span>○</span> 대화</button>
           <button onClick={() => { setGardenOpen(true); setMobileMenu(false); }}><span>♧</span> 테라코타 가든</button>
+          <button onClick={openMcpHub}><span>⌁</span> MCP 연결</button>
           <button onClick={() => { setSettingsOpen(true); setMobileMenu(false); }}><span>⌘</span> 모델 및 구독</button>
         </nav>
 
@@ -314,7 +433,7 @@ export default function Home() {
         <div className={`conversation ${messages.length ? "has-messages" : ""}`}>
           {messages.length === 0 ? (
             <div className="empty-state">
-              <span className="hello-seed">♧</span>
+              <span className="hello-seed"><TerracottaMark size="large" /></span>
               <h1>무엇을 도와드릴까요?</h1>
               <p>필요한 모델은 제가 알아서 고를게요.</p>
               <div className="quick-prompts">
@@ -327,7 +446,7 @@ export default function Home() {
             <div className="message-list">
               {messages.map((message, index) => (
                 <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
-                  {message.role === "assistant" && <span className="assistant-seed">●</span>}
+                  {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
                   <div>
                     <p>{message.text}</p>
                     {message.models && <small>{message.models}로 함께 작업함 · 가든 +1</small>}
@@ -336,7 +455,7 @@ export default function Home() {
               ))}
               {isWorking && (
                 <article className="message assistant thinking">
-                  <span className="assistant-seed">●</span>
+                  <span className="assistant-seed"><TerracottaMark size="tiny" /></span>
                   <div><p><i /><i /><i /></p><small>{selectedTeam}가 작업 중</small></div>
                 </article>
               )}
@@ -457,6 +576,60 @@ export default function Home() {
               })}
             </div>
             <p className="device-note">정원은 현재 기기에 저장됩니다.</p>
+          </section>
+        </div>
+      )}
+
+      {mcpOpen && (
+        <div className="overlay" role="presentation" onMouseDown={() => setMcpOpen(false)}>
+          <section className="dialog mcp-dialog" role="dialog" aria-modal="true" aria-label="MCP 연결" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="dialog-close" onClick={() => setMcpOpen(false)} aria-label="닫기">×</button>
+            <header className="mcp-header">
+              <TerracottaMark size="large" />
+              <div><p>Terracotta MCP Hub</p><h2>일하는 곳을 연결하세요</h2><span>승인한 서비스의 도구만 테라코타가 발견하고 사용합니다.</span></div>
+            </header>
+
+            <div className="mcp-summary">
+              <span><i className="online" /><b>{mcpConnections.filter((item) => item.status === "connected").length}</b> 연결됨</span>
+              <span><b>{mcpConnections.reduce((sum, item) => sum + item.tool_count, 0)}</b> 사용 가능한 도구</span>
+              <button onClick={() => void loadMcp()} disabled={mcpLoading}>{mcpLoading ? "확인 중" : "새로고침"}</button>
+            </div>
+
+            <p className="mcp-note">{mcpNote}</p>
+
+            <div className="mcp-grid" aria-live="polite">
+              {mcpLoading && mcpConnections.length === 0 ? <p className="mcp-empty">연결 목록을 불러오고 있어요.</p> : mcpConnections.map((item) => {
+                const connected = item.status === "connected";
+                const authorizing = item.status === "authorizing";
+                const failed = item.status === "error";
+                return (
+                  <article className={`mcp-card ${connected ? "connected" : ""}`} key={item.id}>
+                    <div className="mcp-card-top">
+                      <span className={`mcp-service-mark service-${item.id.split("-")[0]}`}>{item.name.slice(0, 1).toUpperCase()}</span>
+                      <div><b>{item.name}</b><small>{item.category} · {item.note}</small></div>
+                      <em className={connected ? "connected" : failed ? "failed" : ""}>{connected ? `${item.tool_count}개 도구` : authorizing ? "승인 중" : failed ? "확인 필요" : "연결 안 됨"}</em>
+                    </div>
+                    {connected && item.tools.length > 0 && (
+                      <div className="mcp-tools">{item.tools.slice(0, 4).map((tool, index) => <span key={`${tool.name ?? "tool"}-${index}`}>{tool.name ?? "tool"}</span>)}{item.tools.length > 4 && <span>+{item.tools.length - 4}</span>}</div>
+                    )}
+                    {item.error && !connected && <p className="mcp-error">{item.error}</p>}
+                    <div className="mcp-card-actions">
+                      <button className="mcp-connect" disabled={mcpBusy === item.id} onClick={() => void connectMcp(item.id)}>{mcpBusy === item.id ? "확인 중" : connected ? "다시 연결" : "연결"}</button>
+                      {(connected || item.id.startsWith("custom-")) && <button className="mcp-disconnect" disabled={mcpBusy === item.id} onClick={() => void disconnectMcp(item.id)}>{item.id.startsWith("custom-") ? "삭제" : "연결 해제"}</button>}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            <form className="custom-mcp" onSubmit={addCustomMcp}>
+              <div><b>직접 추가</b><small>Streamable HTTP를 지원하는 공개 HTTPS MCP 서버</small></div>
+              <input value={customMcp.name} onChange={(event) => setCustomMcp((value) => ({ ...value, name: event.target.value }))} placeholder="서버 이름" aria-label="MCP 서버 이름" />
+              <input value={customMcp.url} onChange={(event) => setCustomMcp((value) => ({ ...value, url: event.target.value }))} placeholder="https://example.com/mcp" type="url" required aria-label="MCP 서버 주소" />
+              <button disabled={mcpBusy === "custom"}>{mcpBusy === "custom" ? "추가 중" : "추가"}</button>
+            </form>
+
+            <p className="mcp-security"><span>✓</span> OAuth 2.1 · PKCE S256 · 토큰 암호화 저장 · 내부 네트워크 주소 차단</p>
           </section>
         </div>
       )}
