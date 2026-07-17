@@ -32,7 +32,7 @@ test("implements a durable, encrypted OAuth MCP hub", async () => {
     source("app/api/mcp/tools/route.ts"),
   ]);
 
-  for (const provider of ["GitHub", "Notion", "Figma", "Linear", "Google Drive"]) {
+  for (const provider of ["GitHub", "Notion", "Figma", "Linear", "Google Drive", "Slack", "Canva", "Stripe", "Supabase", "Sentry", "Postman", "Microsoft Learn", "Hugging Face", "Airtable"]) {
     assert.match(hub, new RegExp(provider.replace(" ", "\\s")));
   }
   assert.match(hub, /AES-GCM/);
@@ -41,9 +41,13 @@ test("implements a durable, encrypted OAuth MCP hub", async () => {
   assert.match(hub, /tools\/list/);
   assert.match(hub, /tools\/call/);
   assert.match(hub, /encrypted_access_token/);
+  assert.match(hub, /configureMcpOAuthApp/);
   assert.match(hub, /내부 네트워크 주소는 연결할 수 없어요/);
   assert.match(schema, /primaryKey\(\{ columns: \[table\.id, table\.ownerId\] \}\)/);
   assert.match(page, /\/api\/mcp\/connect/);
+  assert.match(page, /mcpCategories/);
+  assert.match(page, /OAuth 앱 키를 암호화해 저장/);
+  assert.match(page, /Shopify Storefront/);
   assert.match(connectRoute, /startMcpConnection/);
   assert.match(toolsRoute, /callMcpTool/);
 });

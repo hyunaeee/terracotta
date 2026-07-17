@@ -10,11 +10,41 @@ type Connection = {
 
 const PROTOCOL_VERSION = "2025-11-25";
 const presets = [
-  { id: "github", name: "GitHub", url: "https://api.githubcopilot.com/mcp/", category: "개발", auth: "oauth", note: "저장소·이슈·PR" },
-  { id: "notion", name: "Notion", url: "https://mcp.notion.com/mcp", category: "지식", auth: "oauth", note: "페이지 검색·작성" },
-  { id: "figma", name: "Figma", url: "https://mcp.figma.com/mcp", category: "디자인", auth: "oauth", note: "디자인 컨텍스트" },
-  { id: "linear", name: "Linear", url: "https://mcp.linear.app/mcp", category: "업무", auth: "oauth", note: "이슈·프로젝트" },
-  { id: "google-drive", name: "Google Drive", url: "https://drivemcp.googleapis.com/mcp/v1", category: "파일", auth: "oauth", note: "Developer Preview" },
+  { id: "github", name: "GitHub", url: "https://api.githubcopilot.com/mcp/", category: "개발", auth: "oauth", setup: "auto", note: "저장소·이슈·PR", docs: "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp-in-your-ide/extend-copilot-chat-with-mcp" },
+  { id: "notion", name: "Notion", url: "https://mcp.notion.com/mcp", category: "지식", auth: "oauth", setup: "auto", note: "페이지 검색·작성", docs: "https://developers.notion.com/guides/mcp/get-started-with-mcp" },
+  { id: "figma", name: "Figma", url: "https://mcp.figma.com/mcp", category: "디자인", auth: "oauth", setup: "auto", note: "디자인 컨텍스트", docs: "https://help.figma.com/hc/en-us/articles/39890361040535-VS-Code-and-Figma-Set-up-the-MCP-server" },
+  { id: "linear", name: "Linear", url: "https://mcp.linear.app/mcp", category: "업무", auth: "oauth", setup: "auto", note: "이슈·프로젝트", docs: "https://linear.app/docs/mcp" },
+  { id: "google-drive", name: "Google Drive", url: "https://drivemcp.googleapis.com/mcp/v1", category: "파일", auth: "oauth", setup: "app", note: "Drive Developer Preview", docs: "https://developers.google.com/workspace/drive/api/reference/mcp" },
+  { id: "atlassian", name: "Atlassian Rovo", url: "https://mcp.atlassian.com/v1/mcp/authv2", category: "업무", auth: "oauth", setup: "auto", note: "Jira·Confluence·Bitbucket", docs: "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/" },
+  { id: "slack", name: "Slack", url: "https://mcp.slack.com/mcp", category: "업무", auth: "oauth", setup: "app", note: "메시지·검색·Canvas", docs: "https://docs.slack.dev/ai/slack-mcp-server/" },
+  { id: "asana", name: "Asana", url: "https://mcp.asana.com/v2/mcp", category: "업무", auth: "oauth", setup: "app", note: "업무·프로젝트·일정", docs: "https://developers.asana.com/docs/integrating-with-asanas-mcp-server" },
+  { id: "airtable", name: "Airtable", url: "https://mcp.airtable.com/mcp", category: "업무", auth: "oauth", setup: "app", note: "베이스·레코드·스키마", docs: "https://support.airtable.com/v1/docs/using-the-airtable-mcp-server" },
+  { id: "canva", name: "Canva", url: "https://mcp.canva.com/mcp", category: "디자인", auth: "oauth", setup: "auto", note: "디자인·브랜드·에셋", docs: "https://www.canva.dev/docs/mcp/" },
+  { id: "box", name: "Box", url: "https://mcp.box.com", category: "파일", auth: "oauth", setup: "auto", note: "기업 파일 검색·분석", docs: "https://developer.box.com/guides/box-mcp/remote/" },
+  { id: "stripe", name: "Stripe", url: "https://mcp.stripe.com", category: "비즈니스", auth: "oauth", setup: "auto", note: "결제·고객·리포트", docs: "https://docs.stripe.com/mcp" },
+  { id: "paypal", name: "PayPal", url: "https://mcp.paypal.com/http", category: "비즈니스", auth: "oauth", setup: "app", note: "결제·인보이스·주문", docs: "https://docs.paypal.ai/developer/tools/ai/mcp-quickstart" },
+  { id: "hubspot", name: "HubSpot", url: "https://mcp.hubspot.com/", category: "비즈니스", auth: "oauth", setup: "app", note: "CRM·연락처·파이프라인", docs: "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server" },
+  { id: "intercom", name: "Intercom", url: "https://mcp.intercom.com/mcp", category: "비즈니스", auth: "oauth", setup: "auto", note: "고객·대화·Help Center", docs: "https://developers.intercom.com/docs/guides/mcp" },
+  { id: "supabase", name: "Supabase", url: "https://mcp.supabase.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "DB·Edge Functions·로그", docs: "https://supabase.com/docs/guides/ai-tools/mcp" },
+  { id: "vercel", name: "Vercel", url: "https://mcp.vercel.com", category: "인프라", auth: "oauth", setup: "restricted", note: "프로젝트·배포·로그 Beta", docs: "https://vercel.com/docs/agent-resources/vercel-mcp" },
+  { id: "sentry", name: "Sentry", url: "https://mcp.sentry.dev/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "오류·이슈·성능", docs: "https://github.com/getsentry/sentry-mcp" },
+  { id: "grafana", name: "Grafana Cloud", url: "https://mcp.grafana.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "메트릭·로그·트레이스 Preview", docs: "https://grafana.com/docs/grafana-cloud/machine-learning/assistant/configure/cloud-mcp/" },
+  { id: "cloudflare", name: "Cloudflare API", url: "https://mcp.cloudflare.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "Cloudflare 전체 API", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "cloudflare-docs", name: "Cloudflare Docs", url: "https://docs.mcp.cloudflare.com/mcp", category: "개발", auth: "auto", setup: "public", note: "최신 Cloudflare 문서", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "cloudflare-bindings", name: "Workers Bindings", url: "https://bindings.mcp.cloudflare.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "Workers 저장소·AI 바인딩", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "cloudflare-builds", name: "Workers Builds", url: "https://builds.mcp.cloudflare.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "빌드 조회·관리", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "cloudflare-audit", name: "Cloudflare Audit Logs", url: "https://auditlogs.mcp.cloudflare.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "감사 로그·리포트", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "cloudflare-dns", name: "Cloudflare DNS Analytics", url: "https://dns-analytics.mcp.cloudflare.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "DNS 성능·진단", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "cloudflare-dex", name: "Cloudflare DEX", url: "https://dex.mcp.cloudflare.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "디지털 경험 모니터링", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "cloudflare-casb", name: "Cloudflare CASB", url: "https://casb.mcp.cloudflare.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "SaaS 보안 설정 점검", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "cloudflare-graphql", name: "Cloudflare GraphQL", url: "https://graphql.mcp.cloudflare.com/mcp", category: "인프라", auth: "oauth", setup: "auto", note: "GraphQL 분석 데이터", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "cloudflare-agents", name: "Cloudflare Agents Docs", url: "https://agents.cloudflare.com/mcp", category: "개발", auth: "auto", setup: "public", note: "Agents SDK 문서", docs: "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/" },
+  { id: "gitlab", name: "GitLab", url: "https://gitlab.com/api/v4/mcp", category: "개발", auth: "oauth", setup: "auto", note: "프로젝트·이슈·Merge Request", docs: "https://docs.gitlab.com/user/model_context_protocol/" },
+  { id: "postman", name: "Postman", url: "https://mcp.postman.com/mcp", category: "개발", auth: "oauth", setup: "auto", note: "API·컬렉션·워크스페이스", docs: "https://learning.postman.com/docs/reference/postman-api/postman-mcp-server/postman-mcp-remote-server" },
+  { id: "microsoft-learn", name: "Microsoft Learn", url: "https://learn.microsoft.com/api/mcp", category: "개발", auth: "none", setup: "public", note: "Microsoft 공식 문서·샘플", docs: "https://learn.microsoft.com/en-us/training/support/mcp" },
+  { id: "hugging-face", name: "Hugging Face", url: "https://hf.co/mcp", category: "AI", auth: "oauth", setup: "auto", note: "모델·데이터셋·Spaces", docs: "https://huggingface.co/docs/hub/en/agents-mcp" },
+  { id: "exa", name: "Exa Search", url: "https://mcp.exa.ai/mcp", category: "검색", auth: "none", setup: "public", note: "웹·코드 검색·페이지 읽기", docs: "https://exa.ai/docs/reference/exa-mcp" },
+  { id: "context7", name: "Context7", url: "https://mcp.context7.com/mcp", category: "개발", auth: "none", setup: "public", note: "최신 라이브러리 문서", docs: "https://context7.com/docs/resources/troubleshooting" },
 ];
 
 const schema = [
@@ -109,7 +139,8 @@ function metadataCandidates(server: URL, challenge: string | null) {
   const found = challenge?.match(/resource_metadata="([^"]+)"/i)?.[1];
   if (found) return [found];
   const path = server.pathname === "/" ? "" : server.pathname.replace(/\/$/, "");
-  return [`${server.origin}/.well-known/oauth-protected-resource${path}`, `${server.origin}/.well-known/oauth-protected-resource`];
+  const parent = path.replace(/\/mcp$/i, "");
+  return [...new Set([`${server.origin}/.well-known/oauth-protected-resource${path}`, `${server.origin}${parent}/.well-known/oauth-protected-resource`, `${server.origin}/.well-known/oauth-protected-resource`])];
 }
 function authMetadataCandidates(issuerValue: string) {
   const issuer = assertSafeUrl(issuerValue); const path = issuer.pathname === "/" ? "" : issuer.pathname.replace(/\/$/, "");
@@ -125,8 +156,12 @@ async function connection(db: D1Database, owner: string, id: string) {
 
 export async function listMcpConnections(request: Request) {
   const db = env().DB; const owner = ownerId(request); await ensureHub(db, owner);
-  const rows = await db.prepare("SELECT id, name, server_url, category, status, auth_type, tool_count, tools_json, last_checked_at, error FROM mcp_connections WHERE owner_id=? ORDER BY CASE id WHEN 'github' THEN 1 WHEN 'notion' THEN 2 WHEN 'figma' THEN 3 WHEN 'linear' THEN 4 WHEN 'google-drive' THEN 5 ELSE 9 END, name").bind(owner).all<Record<string, unknown>>();
-  return rows.results.map((row) => ({ ...row, tools: JSON.parse(String(row.tools_json ?? "[]")), tools_json: undefined, note: presets.find((item) => item.id === row.id)?.note ?? "사용자 MCP" }));
+  const rows = await db.prepare("SELECT id, name, server_url, category, status, auth_type, tool_count, tools_json, CASE WHEN oauth_client_id IS NULL THEN 0 ELSE 1 END AS has_credentials, last_checked_at, error FROM mcp_connections WHERE owner_id=?").bind(owner).all<Record<string, unknown>>();
+  const order = new Map(presets.map((item, index) => [item.id, index]));
+  return rows.results.map((row) => {
+    const preset = presets.find((item) => item.id === row.id);
+    return { ...row, has_credentials: Boolean(row.has_credentials), tools: JSON.parse(String(row.tools_json ?? "[]")), tools_json: undefined, note: preset?.note ?? "사용자 MCP", setup: preset?.setup ?? "custom", docs: preset?.docs ?? null };
+  }).sort((a, b) => (order.get(String(a.id)) ?? 999) - (order.get(String(b.id)) ?? 999) || String(a.name).localeCompare(String(b.name)));
 }
 
 export async function addCustomMcp(request: Request, payload: { name?: string; url?: string }) {
@@ -137,10 +172,21 @@ export async function addCustomMcp(request: Request, payload: { name?: string; u
   return { id };
 }
 
+export async function configureMcpOAuthApp(request: Request, payload: { id?: string; clientId?: string; clientSecret?: string }) {
+  const db = env().DB; const owner = ownerId(request); await ensureHub(db, owner);
+  const id = payload.id?.trim() ?? ""; const clientId = payload.clientId?.trim() ?? "";
+  if (!id || !clientId) throw new Error("MCP와 OAuth Client ID를 입력해 주세요.");
+  await connection(db, owner, id);
+  const clientSecret = payload.clientSecret?.trim() || null;
+  await db.prepare("UPDATE mcp_connections SET oauth_client_id=?, encrypted_client_secret=?, status='not_connected', error=NULL, updated_at=CURRENT_TIMESTAMP WHERE owner_id=? AND id=?").bind(clientId.slice(0, 500), clientSecret ? await encrypt(clientSecret) : null, owner, id).run();
+  return { configured: true };
+}
+
 export async function startMcpConnection(request: Request, id: string) {
   const db = env().DB; const owner = ownerId(request); await ensureHub(db, owner); const item = await connection(db, owner, id);
   try {
-    const initial = await initializeAndList(item, null);
+    const storedToken = item.encrypted_access_token ? await activeAccessToken(db, item) : null;
+    const initial = await initializeAndList(item, storedToken);
     if (!initial.unauthorized) {
       await db.prepare("UPDATE mcp_connections SET status='connected', auth_type='none', tool_count=?, tools_json=?, last_checked_at=CURRENT_TIMESTAMP, error=NULL, updated_at=CURRENT_TIMESTAMP WHERE owner_id=? AND id=?").bind(initial.tools.length, JSON.stringify(initial.tools), owner, id).run();
       return { connected: true, toolCount: initial.tools.length };
@@ -154,8 +200,8 @@ export async function startMcpConnection(request: Request, id: string) {
     if (!authorizationEndpoint || !tokenEndpoint) throw new Error("OAuth 인증 또는 토큰 주소가 없어요.");
     if (!Array.isArray(auth.code_challenge_methods_supported) || !auth.code_challenge_methods_supported.includes("S256")) throw new Error("이 서버는 필수 PKCE S256 인증을 지원하지 않아요.");
     const origin = new URL(request.url).origin; const redirectUri = `${origin}/api/mcp/callback`; const metadataUrl = `${origin}/api/mcp/client-metadata`;
-    let clientId = metadataUrl; let clientSecret: string | null = null;
-    if (auth.client_id_metadata_document_supported !== true) {
+    let clientId = item.oauth_client_id || metadataUrl; let clientSecret = await decrypt(item.encrypted_client_secret);
+    if (!item.oauth_client_id && auth.client_id_metadata_document_supported !== true) {
       const registrationEndpoint = String(auth.registration_endpoint ?? "");
       if (!registrationEndpoint) throw new Error("공급사 OAuth 앱 등록이 필요해요.");
       const registration = await fetch(assertSafeUrl(registrationEndpoint), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_name: "Terracotta", redirect_uris: [redirectUri], grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" }), redirect: "error", signal: AbortSignal.timeout(20_000) });

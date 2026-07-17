@@ -70,9 +70,18 @@ type McpConnection = {
   tool_count: number;
   tools: McpTool[];
   note: string;
+  setup: "auto" | "app" | "public" | "restricted" | "custom";
+  docs: string | null;
+  has_credentials: boolean;
   last_checked_at: string | null;
   error: string | null;
 };
+
+const mcpTemplates = [
+  { name: "Shopify Storefront", url: "https://your-shop.myshopify.com/api/mcp", note: "your-shop을 실제 스토어 주소로 변경" },
+  { name: "Cloudflare AI Search", url: "https://your-instance.search.ai.cloudflare.com/mcp", note: "공개 AI Search 인스턴스 주소" },
+  { name: "Azure API Center", url: "https://your-service.data.your-region.azure-apicenter.ms/mcp", note: "서비스·리전 주소로 변경" },
+];
 
 function TerracottaMark({ size = "normal" }: { size?: "tiny" | "normal" | "large" }) {
   return (
@@ -103,6 +112,10 @@ export default function Home() {
   const [mcpBusy, setMcpBusy] = useState<string | null>(null);
   const [mcpNote, setMcpNote] = useState("공식 서버를 연결하면 테라코타가 필요한 도구를 발견해 사용할 수 있어요.");
   const [customMcp, setCustomMcp] = useState({ name: "", url: "" });
+  const [mcpQuery, setMcpQuery] = useState("");
+  const [mcpCategory, setMcpCategory] = useState("전체");
+  const [mcpSetupId, setMcpSetupId] = useState<string | null>(null);
+  const [mcpCredentials, setMcpCredentials] = useState({ clientId: "", clientSecret: "" });
   const [modelPreference, setModelPreference] = useState<ModelPreference>("latest");
   const [registryStatus, setRegistryStatus] = useState<RegistryStatus | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
@@ -248,6 +261,25 @@ export default function Home() {
     }
   }
 
+  async function saveMcpCredentials(event: FormEvent) {
+    event.preventDefault();
+    if (!mcpSetupId || !mcpCredentials.clientId.trim()) return;
+    setMcpBusy(mcpSetupId);
+    try {
+      const response = await fetch("/api/mcp", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: mcpSetupId, ...mcpCredentials }) });
+      const payload = await response.json() as { configured?: boolean; error?: string };
+      if (!response.ok) throw new Error(payload.error || "OAuth 앱 키를 저장하지 못했어요.");
+      setMcpCredentials({ clientId: "", clientSecret: "" });
+      setMcpSetupId(null);
+      setMcpNote("OAuth 앱 키를 암호화해 저장했어요. 이제 연결을 눌러 승인해 주세요.");
+      await loadMcp();
+    } catch (error) {
+      setMcpNote(error instanceof Error ? error.message : "OAuth 앱 키를 저장하지 못했어요.");
+    } finally {
+      setMcpBusy(null);
+    }
+  }
+
   const routingOrder = useMemo(() => {
     if (modelPreference === "claude") return { primary: registryStatus?.models.find((model) => model.provider === "anthropic")?.name ?? "Claude Fable 5", backup: "GPT-5.6" };
     if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "anthropic") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "openai")?.name ?? "GPT" };
@@ -269,6 +301,12 @@ export default function Home() {
   const nextTreeAt = treeStage === 3 ? null : (treeStage + 1) * 12;
   const grassCells = useMemo(() => new Set(placements.filter((item) => item.itemId === "grass").map((item) => item.cell)), [placements]);
   const grassCount = grassCells.size;
+  const mcpCategories = useMemo(() => ["전체", ...Array.from(new Set(mcpConnections.map((item) => item.category)))], [mcpConnections]);
+  const visibleMcpConnections = useMemo(() => {
+    const query = mcpQuery.trim().toLowerCase();
+    return mcpConnections.filter((item) => (mcpCategory === "전체" || item.category === mcpCategory) && (!query || `${item.name} ${item.note} ${item.category}`.toLowerCase().includes(query)));
+  }, [mcpCategory, mcpConnections, mcpQuery]);
+  const setupConnection = mcpConnections.find((item) => item.id === mcpSetupId) ?? null;
 
   async function submitTask(event: FormEvent) {
     event.preventDefault();
@@ -592,34 +630,58 @@ export default function Home() {
             <div className="mcp-summary">
               <span><i className="online" /><b>{mcpConnections.filter((item) => item.status === "connected").length}</b> 연결됨</span>
               <span><b>{mcpConnections.reduce((sum, item) => sum + item.tool_count, 0)}</b> 사용 가능한 도구</span>
+              <span><b>{mcpConnections.filter((item) => !item.id.startsWith("custom-")).length}</b> 공식 커넥터</span>
               <button onClick={() => void loadMcp()} disabled={mcpLoading}>{mcpLoading ? "확인 중" : "새로고침"}</button>
             </div>
 
             <p className="mcp-note">{mcpNote}</p>
 
+            <div className="mcp-browser">
+              <input value={mcpQuery} onChange={(event) => setMcpQuery(event.target.value)} placeholder="GitHub, 디자인, 결제처럼 검색" aria-label="MCP 검색" />
+              <div className="mcp-categories">{mcpCategories.map((category) => <button key={category} className={mcpCategory === category ? "active" : ""} onClick={() => setMcpCategory(category)}>{category}</button>)}</div>
+            </div>
+
             <div className="mcp-grid" aria-live="polite">
-              {mcpLoading && mcpConnections.length === 0 ? <p className="mcp-empty">연결 목록을 불러오고 있어요.</p> : mcpConnections.map((item) => {
+              {mcpLoading && mcpConnections.length === 0 ? <p className="mcp-empty">연결 목록을 불러오고 있어요.</p> : visibleMcpConnections.length === 0 ? <p className="mcp-empty">조건에 맞는 MCP가 없어요.</p> : visibleMcpConnections.map((item) => {
                 const connected = item.status === "connected";
                 const authorizing = item.status === "authorizing";
                 const failed = item.status === "error";
+                const needsApp = item.setup === "app" && !item.has_credentials;
                 return (
                   <article className={`mcp-card ${connected ? "connected" : ""}`} key={item.id}>
                     <div className="mcp-card-top">
                       <span className={`mcp-service-mark service-${item.id.split("-")[0]}`}>{item.name.slice(0, 1).toUpperCase()}</span>
                       <div><b>{item.name}</b><small>{item.category} · {item.note}</small></div>
-                      <em className={connected ? "connected" : failed ? "failed" : ""}>{connected ? `${item.tool_count}개 도구` : authorizing ? "승인 중" : failed ? "확인 필요" : "연결 안 됨"}</em>
+                      <em className={connected ? "connected" : failed ? "failed" : ""}>{connected ? `${item.tool_count}개 도구` : authorizing ? "승인 중" : failed ? "확인 필요" : needsApp ? "앱 키 필요" : item.setup === "public" ? "바로 연결" : item.setup === "restricted" ? "공급사 승인형" : "연결 안 됨"}</em>
                     </div>
                     {connected && item.tools.length > 0 && (
                       <div className="mcp-tools">{item.tools.slice(0, 4).map((tool, index) => <span key={`${tool.name ?? "tool"}-${index}`}>{tool.name ?? "tool"}</span>)}{item.tools.length > 4 && <span>+{item.tools.length - 4}</span>}</div>
                     )}
                     {item.error && !connected && <p className="mcp-error">{item.error}</p>}
                     <div className="mcp-card-actions">
-                      <button className="mcp-connect" disabled={mcpBusy === item.id} onClick={() => void connectMcp(item.id)}>{mcpBusy === item.id ? "확인 중" : connected ? "다시 연결" : "연결"}</button>
+                      <button className="mcp-connect" disabled={mcpBusy === item.id || needsApp} onClick={() => void connectMcp(item.id)}>{mcpBusy === item.id ? "확인 중" : connected ? "다시 연결" : needsApp ? "앱 키 먼저" : "연결"}</button>
+                      {item.setup === "app" && <button className="mcp-setup" onClick={() => { setMcpSetupId(item.id); setMcpCredentials({ clientId: "", clientSecret: "" }); }}>{item.has_credentials ? "앱 키 변경" : "앱 키 설정"}</button>}
+                      {item.docs && <a href={item.docs} target="_blank" rel="noreferrer">공식 안내</a>}
                       {(connected || item.id.startsWith("custom-")) && <button className="mcp-disconnect" disabled={mcpBusy === item.id} onClick={() => void disconnectMcp(item.id)}>{item.id.startsWith("custom-") ? "삭제" : "연결 해제"}</button>}
                     </div>
                   </article>
                 );
               })}
+            </div>
+
+            {setupConnection && (
+              <form className="mcp-oauth-setup" onSubmit={saveMcpCredentials}>
+                <div className="mcp-oauth-title"><div><b>{setupConnection.name} OAuth 앱</b><small>공급사 개발자 화면에서 아래 콜백 주소로 앱을 만든 뒤 받은 키를 입력하세요.</small></div><button type="button" onClick={() => setMcpSetupId(null)} aria-label="앱 키 설정 닫기">×</button></div>
+                <label><span>콜백 주소</span><input readOnly value={ready && typeof window !== "undefined" ? `${window.location.origin}/api/mcp/callback` : "/api/mcp/callback"} /></label>
+                <label><span>Client ID</span><input value={mcpCredentials.clientId} onChange={(event) => setMcpCredentials((value) => ({ ...value, clientId: event.target.value }))} required autoComplete="off" /></label>
+                <label><span>Client Secret</span><input type="password" value={mcpCredentials.clientSecret} onChange={(event) => setMcpCredentials((value) => ({ ...value, clientSecret: event.target.value }))} autoComplete="new-password" placeholder="공개 클라이언트면 비워둘 수 있어요" /></label>
+                <button className="mcp-oauth-save" disabled={mcpBusy === setupConnection.id}>{mcpBusy === setupConnection.id ? "저장 중" : "암호화해 저장"}</button>
+              </form>
+            )}
+
+            <div className="mcp-templates">
+              <div><b>주소형 커넥터</b><small>내 서비스 주소가 따로 있는 MCP는 골라서 주소만 바꾸세요.</small></div>
+              {mcpTemplates.map((template) => <button key={template.name} onClick={() => { setCustomMcp({ name: template.name, url: template.url }); setMcpNote(template.note); }}>{template.name}</button>)}
             </div>
 
             <form className="custom-mcp" onSubmit={addCustomMcp}>
