@@ -4,7 +4,7 @@ export type ProviderId = "openai" | "anthropic" | "perplexity" | "higgsfield";
 export type ModelPreference = "latest" | "gpt" | "claude";
 export type TaskKind = "general" | "research" | "creative";
 
-type RuntimeEnv = {
+export type RuntimeEnv = {
   DB: D1Database;
   OPENAI_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
@@ -13,7 +13,7 @@ type RuntimeEnv = {
   TERRACOTTA_MONTHLY_BUDGET_USD?: string;
 };
 
-type RegistryRow = {
+export type RegistryRow = {
   provider: ProviderId;
   model_id: string;
   display_name: string;
@@ -25,7 +25,7 @@ type RegistryRow = {
   source: string;
 };
 
-type Invocation = {
+export type Invocation = {
   provider: ProviderId;
   model: string;
   text: string;
@@ -53,7 +53,7 @@ const seeds = [
   { provider: "higgsfield" as const, model: "higgsfield-mcp", name: "Higgsfield MCP", rank: 100, input: 0, output: 0 },
 ];
 
-function runtimeEnv() {
+export function runtimeEnv() {
   return cloudflareEnv as unknown as RuntimeEnv;
 }
 
@@ -145,12 +145,12 @@ export async function syncProviderRegistry(force = false) {
   }
 }
 
-async function currentModels(db: D1Database) {
+export async function currentModels(db: D1Database) {
   const result = await db.prepare(`SELECT m.provider, m.model_id, m.display_name, m.remote_created_at, m.version_rank, m.is_routable, m.input_price_micros, m.output_price_micros, m.source FROM model_registry m JOIN provider_sync s ON s.provider=m.provider AND s.current_model=m.model_id WHERE m.is_routable=1`).all<RegistryRow>();
   return result.results;
 }
 
-function chooseLatestFrontier(models: RegistryRow[]) {
+export function chooseLatestFrontier(models: RegistryRow[]) {
   const openai = models.find((model) => model.provider === "openai");
   const anthropic = models.find((model) => model.provider === "anthropic");
   if (!openai) return anthropic;
@@ -161,7 +161,7 @@ function chooseLatestFrontier(models: RegistryRow[]) {
   return openai.version_rank >= anthropic.version_rank ? openai : anthropic;
 }
 
-function configured(env: RuntimeEnv, provider: ProviderId) {
+export function configured(env: RuntimeEnv, provider: ProviderId) {
   if (provider === "openai") return Boolean(env.OPENAI_API_KEY);
   if (provider === "anthropic") return Boolean(env.ANTHROPIC_API_KEY);
   if (provider === "perplexity") return Boolean(env.PERPLEXITY_API_KEY);
@@ -193,7 +193,7 @@ export async function savePreference(preference: ModelPreference) {
   await env.DB.prepare(`INSERT INTO owner_settings (owner_id, model_preference, updated_at) VALUES ('owner', ?, CURRENT_TIMESTAMP) ON CONFLICT(owner_id) DO UPDATE SET model_preference=excluded.model_preference, updated_at=CURRENT_TIMESTAMP`).bind(preference).run();
 }
 
-function classifyTask(prompt: string): TaskKind {
+export function classifyTask(prompt: string): TaskKind {
   if (/(영상|릴스|이미지|사진|video|image)/i.test(prompt)) return "creative";
   if (/(찾아|검색|최신|리서치|출처|search|research|today|뉴스)/i.test(prompt)) return "research";
   return "general";
@@ -217,14 +217,14 @@ async function invokeAnthropic(key: string, model: string, prompt: string): Prom
   return { provider: "anthropic", model, text: payload.content?.filter((item) => item.type === "text").map((item) => item.text ?? "").join("\n") ?? "", inputUnits: payload.usage?.input_tokens ?? 0, outputUnits: payload.usage?.output_tokens ?? 0 };
 }
 
-async function invokePerplexity(key: string, prompt: string): Promise<Invocation> {
+export async function invokePerplexity(key: string, prompt: string): Promise<Invocation> {
   const response = await fetch("https://api.perplexity.ai/v1/sonar", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "sonar-pro", max_tokens: 1200, messages: [{ role: "user", content: prompt }] }), signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`Perplexity response failed with ${response.status}`);
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: { total_cost?: number } }; citations?: string[] };
   return { provider: "perplexity", model: "sonar-pro", text: payload.choices?.[0]?.message?.content ?? "", inputUnits: payload.usage?.prompt_tokens ?? 0, outputUnits: payload.usage?.completion_tokens ?? 0, actualCostMicros: typeof payload.usage?.cost?.total_cost === "number" ? Math.round(payload.usage.cost.total_cost * 1_000_000) : undefined, citations: payload.citations };
 }
 
-async function recordUsage(db: D1Database, invocation: Invocation, task: TaskKind, model: RegistryRow | undefined) {
+export async function recordUsage(db: D1Database, invocation: Invocation, task: TaskKind, model: RegistryRow | undefined) {
   const estimated = Math.round((invocation.inputUnits * (model?.input_price_micros ?? 0) + invocation.outputUnits * (model?.output_price_micros ?? 0)) / 1_000_000) + (invocation.provider === "perplexity" ? 10_000 : 0);
   const cost = invocation.actualCostMicros ?? estimated;
   await db.prepare("INSERT INTO usage_ledger (id, provider, model_id, task_type, input_units, output_units, provider_cost_micros, currency, is_live) VALUES (?, ?, ?, ?, ?, ?, ?, 'USD', 1)")

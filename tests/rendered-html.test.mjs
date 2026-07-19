@@ -145,3 +145,33 @@ test("adds a sourced, live-updating model intelligence lab", async () => {
   assert.match(intelligence, /AbortSignal\.timeout/);
   assert.match(route, /s-maxage=21600/);
 });
+
+test("orchestrates models and MCP tools with durable write approval", async () => {
+  const [orchestrator, assistantRoute, page, css, schema, migration] = await Promise.all([
+    source("lib/terracotta-orchestrator.ts"),
+    source("app/api/assistant/route.ts"),
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("db/schema.ts"),
+    source("drizzle/0003_curved_natasha_romanoff.sql"),
+  ]);
+
+  assert.match(orchestrator, /MAX_AGENT_ROUNDS/);
+  assert.match(orchestrator, /terracotta_web_research/);
+  assert.match(orchestrator, /callMcpTool/);
+  assert.match(orchestrator, /function_call_output/);
+  assert.match(orchestrator, /tool_result/);
+  assert.match(orchestrator, /readOnlyHint/);
+  assert.match(orchestrator, /approval_required/);
+  assert.match(orchestrator, /resolveApproval/);
+  assert.match(orchestrator, /function shouldReview/);
+  assert.match(assistantRoute, /result\.approvalRequired \? 202 : 200/);
+  assert.match(page, /승인하고 실행/);
+  assert.match(page, /인자 변경은 허용하지 않아요/);
+  assert.match(page, /orchestration-trace/);
+  assert.match(css, /\.tool-approval/);
+  assert.match(schema, /orchestrationRuns/);
+  assert.match(schema, /orchestrationEvents/);
+  assert.match(migration, /CREATE TABLE `orchestration_runs`/);
+  assert.match(migration, /CREATE TABLE `orchestration_events`/);
+});

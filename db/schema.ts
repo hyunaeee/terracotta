@@ -79,3 +79,38 @@ export const mcpOauthStates = sqliteTable("mcp_oauth_states", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   expiresAt: text("expires_at").notNull(),
 });
+
+export const orchestrationRuns = sqliteTable("orchestration_runs", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  prompt: text("prompt").notNull(),
+  preference: text("preference").notNull(),
+  taskKind: text("task_kind").notNull(),
+  provider: text("provider").notNull(),
+  modelId: text("model_id").notNull(),
+  stateJson: text("state_json").notNull().default("{}"),
+  toolsJson: text("tools_json").notNull().default("[]"),
+  pendingCallsJson: text("pending_calls_json").notNull().default("[]"),
+  traceJson: text("trace_json").notNull().default("[]"),
+  costMicros: integer("cost_micros").notNull().default(0),
+  status: text("status").notNull().default("running"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  expiresAt: text("expires_at").notNull(),
+});
+
+export const orchestrationEvents = sqliteTable("orchestration_events", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  eventType: text("event_type").notNull(),
+  provider: text("provider"),
+  modelId: text("model_id"),
+  connectionId: text("connection_id"),
+  toolName: text("tool_name"),
+  risk: text("risk"),
+  status: text("status").notNull(),
+  inputJson: text("input_json"),
+  outputSummary: text("output_summary"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

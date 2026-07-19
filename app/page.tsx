@@ -101,7 +101,26 @@ const treeVarieties = [
   { id: "lavender", name: "라벤더 꽃나무", description: "차분한 보랏빛 꽃으로 자라요", cost: 3400, assets: treeStages.map((_, index) => `/assets/terracotta-lavender-${index}.png`) },
 ] as const;
 
-type Message = { role: "user" | "assistant"; text: string; models?: string };
+type OrchestrationStep = { type: "route" | "tool" | "review"; label: string; status: "done" | "approval" | "error" };
+type ApprovalRequest = {
+  id: string;
+  summary: string;
+  expiresAt: string;
+  actions: Array<{ service: string; tool: string; arguments: Record<string, unknown> }>;
+  status?: "pending" | "running" | "approved" | "rejected";
+};
+type Message = { role: "user" | "assistant"; text: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest };
+type AssistantPayload = {
+  text?: string;
+  model?: string;
+  provider?: string;
+  costUsd?: number;
+  error?: string;
+  code?: string;
+  approvalRequired?: boolean;
+  approval?: ApprovalRequest;
+  orchestration?: { runId: string; trace: OrchestrationStep[]; reviewedBy?: string };
+};
 type GardenPosition = { x: number; y: number };
 type GroundTile = { cell: number; grassId: string };
 type GardenPlacement = GardenPosition & { instanceId: string; itemId: string };
@@ -473,6 +492,40 @@ export default function Home() {
   }, [mcpCategory, mcpConnections, mcpQuery]);
   const setupConnection = mcpConnections.find((item) => item.id === mcpSetupId) ?? null;
 
+  function assistantGuidance(payload: AssistantPayload) {
+    if (payload.code === "HIGGSFIELD_MCP_AUTH_REQUIRED") return "이미지·영상 생성 MCP를 연결하면 창작 요청도 자동 실행할 수 있어요.";
+    if (payload.code === "PROVIDER_KEY_REQUIRED") return "오케스트레이터는 준비됐어요. OpenAI, Anthropic 또는 Perplexity API 키를 연결하면 실제 작업을 시작합니다.";
+    if (payload.code === "BUDGET_EXHAUSTED") return "이번 달 공급사 원가 예산에 도달했어요. 예산을 조정한 뒤 다시 시도해 주세요.";
+    return payload.error ?? "연결된 모델이나 도구가 잠시 응답하지 않았어요.";
+  }
+
+  function addAssistantResult(payload: AssistantPayload, fallbackModel: string) {
+    const trace = payload.orchestration?.trace ?? [];
+    if (payload.approvalRequired && payload.approval) {
+      setMessages((items) => [...items, {
+        role: "assistant",
+        text: payload.approval!.summary,
+        models: `${payload.model ?? fallbackModel} · 실행 전 승인 대기`,
+        trace,
+        approval: { ...payload.approval!, status: "pending" },
+      }]);
+      return;
+    }
+    const usedTools = trace.filter((item) => item.type === "tool" && item.status === "done").length;
+    const reviewed = payload.orchestration?.reviewedBy ? ` · ${payload.orchestration.reviewedBy} 검토` : "";
+    const toolLabel = usedTools ? ` · 도구 ${usedTools}개` : "";
+    setMessages((items) => [...items, {
+      role: "assistant",
+      text: payload.text ?? "답변을 준비했어요.",
+      models: `${payload.model ?? fallbackModel}${toolLabel}${reviewed} · 실제 API${typeof payload.costUsd === "number" ? ` · $${payload.costUsd.toFixed(4)}` : ""}`,
+      trace,
+    }]);
+    setSparks((value) => value + 36);
+    setGrowth((value) => value + 1);
+    setGardenNote("방금 끝낸 작업이 새 지식으로 쌓였어요. 받은 Sparks로 정원을 꾸며보세요.");
+    void loadRegistry();
+  }
+
   async function submitTask(event: FormEvent) {
     event.preventDefault();
     const task = prompt.trim();
@@ -483,23 +536,36 @@ export default function Home() {
     setIsWorking(true);
     try {
       const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference }) });
-      const payload = await response.json() as { text?: string; model?: string; provider?: string; costUsd?: number; error?: string; code?: string };
+      const payload = await response.json() as AssistantPayload;
       if (!response.ok) {
-        const guidance = payload.code === "HIGGSFIELD_MCP_AUTH_REQUIRED" ? "Higgsfield 계정을 MCP로 인증하면 이미지와 영상 생성이 바로 연결돼요." : payload.code === "PROVIDER_KEY_REQUIRED" ? "모델 라우터는 준비됐어요. 설정 화면에 표시된 공급사 API 키를 서버에 연결하면 실제 답변을 시작합니다." : payload.error ?? "연결된 모델이 잠시 응답하지 않았어요.";
-        setMessages((items) => [...items, { role: "assistant", text: guidance, models: "연결 설정 필요" }]);
+        setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "연결 설정 필요" }]);
         return;
       }
-      setMessages((items) => [...items, {
-        role: "assistant",
-        text: payload.text ?? "답변을 준비했어요.",
-        models: `${payload.model ?? team} · 실제 API${typeof payload.costUsd === "number" ? ` · $${payload.costUsd.toFixed(4)}` : ""}`,
-      }]);
-      setSparks((value) => value + 36);
-      setGrowth((value) => value + 1);
-      setGardenNote("방금 끝낸 작업이 새 지식으로 쌓였어요. 받은 Sparks로 정원을 꾸며보세요.");
-      void loadRegistry();
+      addAssistantResult(payload, team);
     } catch {
       setMessages((items) => [...items, { role: "assistant", text: "실제 모델 백엔드에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.", models: "연결 오류" }]);
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  async function resolveToolApproval(approval: ApprovalRequest, decision: "approve" | "reject") {
+    if (isWorking || approval.status === "approved" || approval.status === "rejected") return;
+    setIsWorking(true);
+    setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "running" } } : message));
+    try {
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approvalId: approval.id, decision }) });
+      const payload = await response.json() as AssistantPayload;
+      if (!response.ok) {
+        setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "pending" } } : message));
+        setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "승인 처리 오류" }]);
+        return;
+      }
+      setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: decision === "approve" ? "approved" : "rejected" } } : message));
+      addAssistantResult(payload, "Terracotta Auto");
+    } catch {
+      setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "pending" } } : message));
+      setMessages((items) => [...items, { role: "assistant", text: "승인 요청을 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.", models: "연결 오류" }]);
     } finally {
       setIsWorking(false);
     }
@@ -695,7 +761,24 @@ export default function Home() {
                   {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
                   <div>
                     <p>{message.text}</p>
-                    {message.models && <small>{message.models}로 함께 작업함 · 가든 +1</small>}
+                    {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={step.status} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
+                    {message.approval && (
+                      <section className={`tool-approval ${message.approval.status ?? "pending"}`} aria-label="외부 작업 승인">
+                        <div className="tool-approval-head"><b>실행 전 확인</b><span>{message.approval.actions.length}개 작업</span></div>
+                        {message.approval.actions.map((action, actionIndex) => (
+                          <article key={`${action.service}-${action.tool}-${actionIndex}`}>
+                            <div><b>{action.service}</b><small>{action.tool}</small></div>
+                            <code>{JSON.stringify(action.arguments)}</code>
+                          </article>
+                        ))}
+                        <p>승인하면 위 내용 그대로 실행하며, 인자 변경은 허용하지 않아요.</p>
+                        <div className="tool-approval-actions">
+                          <button type="button" className="approve" disabled={isWorking || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
+                          <button type="button" disabled={isWorking || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
+                        </div>
+                      </section>
+                    )}
+                    {message.models && <small>{message.models}{message.approval ? "" : "로 함께 작업함 · 가든 +1"}</small>}
                   </div>
                 </article>
               ))}
