@@ -109,6 +109,18 @@ test("separates lawn terrain from free-position garden objects", async () => {
   }
 });
 
+test("keeps garden depth layers below every modal", async () => {
+  const [page, css] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/globals.css"),
+  ]);
+
+  assert.match(page, /zIndex: Math\.round\(2 \+ position\.y \/ 10\)/);
+  assert.match(css, /\.garden-rail \{ position: relative; z-index: 0; isolation: isolate;/);
+  assert.match(css, /\.pixel-garden \{ position: relative; isolation: isolate;/);
+  assert.match(css, /\.overlay \{ position: fixed; inset: 0; z-index: 50;/);
+});
+
 test("adds a sourced, live-updating model intelligence lab", async () => {
   const [page, css, intelligence, route] = await Promise.all([
     source("app/page.tsx"),

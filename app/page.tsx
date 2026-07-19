@@ -622,7 +622,7 @@ export default function Home() {
   }
 
   function gardenPositionStyle(position: GardenPosition) {
-    return { left: `${position.x}%`, top: `${position.y}%`, zIndex: Math.round(20 + position.y) };
+    return { left: `${position.x}%`, top: `${position.y}%`, zIndex: Math.round(2 + position.y / 10) };
   }
 
   function newChat() {
