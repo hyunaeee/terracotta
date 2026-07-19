@@ -108,3 +108,28 @@ test("separates lawn terrain from free-position garden objects", async () => {
     assert.ok(image.length > 100, `${asset} should be a real PNG asset`);
   }
 });
+
+test("adds a sourced, live-updating model intelligence lab", async () => {
+  const [page, css, intelligence, route] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("lib/model-intelligence.ts"),
+    source("app/api/model-intelligence/route.ts"),
+  ]);
+
+  assert.match(page, /모델 연구소/);
+  assert.match(page, /최근 모델, 한눈에 비교/);
+  assert.match(page, /Arena 공개 데이터 연결됨/);
+  assert.match(page, /잘하는 것/);
+  assert.match(page, /약한 것/);
+  assert.match(css, /\.model-insight-grid/);
+  assert.match(css, /\.model-metrics/);
+  assert.match(intelligence, /lmarena-ai%2Fleaderboard-dataset/);
+  assert.match(intelligence, /Artificial Analysis/);
+  assert.match(intelligence, /Claude Fable 5/);
+  assert.match(intelligence, /GPT-5\.6 Sol/);
+  assert.match(intelligence, /Perplexity Sonar Pro/);
+  assert.match(intelligence, /Kimi K3/);
+  assert.match(intelligence, /AbortSignal\.timeout/);
+  assert.match(route, /s-maxage=21600/);
+});

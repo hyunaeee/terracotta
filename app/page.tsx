@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { ArenaCategory, ModelInsight } from "@/lib/model-intelligence";
 
 const quickPrompts = [
   "오늘 회의 내용을 정리해줘",
@@ -16,6 +17,24 @@ type RegistryStatus = {
   connections: Array<{ provider: string; status: string; model: string | null; lastSyncedAt: string | null; error: string | null; configured: boolean }>;
   monthlyUsage: { calls: number; costUsd: number; budgetUsd: number };
 };
+
+type ModelIntelligencePayload = {
+  updatedAt: string;
+  liveArena: boolean;
+  models: ModelInsight[];
+  sources: Array<{ name: string; note: string; url: string }>;
+  caveat: string;
+};
+
+const modelInsightFilters = ["전체", "코딩", "에이전트", "리서치", "비전", "관심 모델"];
+const arenaMetricOrder: Array<{ id: ArenaCategory; label: string }> = [
+  { id: "text", label: "Text" },
+  { id: "agent", label: "Agent" },
+  { id: "webdev", label: "WebDev" },
+  { id: "vision", label: "Vision" },
+  { id: "search", label: "Search" },
+  { id: "video", label: "Video" },
+];
 
 const modelCatalog = [
   { id: "gpt", provider: "openai", mark: "G", name: "GPT-5.6 Sol", role: "주 추론 · 코딩" },
@@ -186,6 +205,10 @@ export default function Home() {
   const [shopCategory, setShopCategory] = useState("전체");
   const [gardenOpen, setGardenOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelLabOpen, setModelLabOpen] = useState(false);
+  const [modelInsights, setModelInsights] = useState<ModelIntelligencePayload | null>(null);
+  const [modelInsightLoading, setModelInsightLoading] = useState(false);
+  const [modelInsightFilter, setModelInsightFilter] = useState("전체");
   const [mcpOpen, setMcpOpen] = useState(false);
   const [mcpConnections, setMcpConnections] = useState<McpConnection[]>([]);
   const [mcpLoading, setMcpLoading] = useState(false);
@@ -304,6 +327,23 @@ export default function Home() {
       setRegistryStatus(await response.json() as RegistryStatus);
     } catch { setRegistryStatus(null); }
     finally { setRegistryLoading(false); }
+  }
+
+  async function loadModelInsights() {
+    setModelInsightLoading(true);
+    try {
+      const response = await fetch("/api/model-intelligence", { cache: "no-store" });
+      if (!response.ok) throw new Error("model intelligence unavailable");
+      setModelInsights(await response.json() as ModelIntelligencePayload);
+    } catch { setModelInsights(null); }
+    finally { setModelInsightLoading(false); }
+  }
+
+  function openModelLab() {
+    setModelLabOpen(true);
+    setSettingsOpen(false);
+    setMobileMenu(false);
+    if (!modelInsights) void loadModelInsights();
   }
 
   async function loadMcp() {
@@ -425,6 +465,7 @@ export default function Home() {
   const fullLawn = grassShop.find((item) => item.id === fullLawnGrassId) ?? null;
   const gardenCategories = useMemo(() => ["전체", ...Array.from(new Set(gardenShop.map((item) => item.category)))], []);
   const visibleGardenItems = useMemo(() => gardenShop.filter((item) => shopCategory === "전체" || item.category === shopCategory), [shopCategory]);
+  const visibleModelInsights = useMemo(() => (modelInsights?.models ?? []).filter((model) => modelInsightFilter === "전체" || model.categories.includes(modelInsightFilter)), [modelInsightFilter, modelInsights]);
   const mcpCategories = useMemo(() => ["전체", ...Array.from(new Set(mcpConnections.map((item) => item.category)))], [mcpConnections]);
   const visibleMcpConnections = useMemo(() => {
     const query = mcpQuery.trim().toLowerCase();
@@ -606,6 +647,7 @@ export default function Home() {
           <button className="active" onClick={() => setMobileMenu(false)}><span>○</span> 대화</button>
           <button onClick={() => { setGardenOpen(true); setMobileMenu(false); }}><span>♧</span> 테라코타 가든</button>
           <button onClick={openMcpHub}><span>⌁</span> MCP 연결</button>
+          <button onClick={openModelLab}><span>◫</span> 모델 연구소</button>
           <button onClick={() => { setSettingsOpen(true); setMobileMenu(false); }}><span>⌘</span> 모델 및 구독</button>
         </nav>
 
@@ -904,11 +946,72 @@ export default function Home() {
         </div>
       )}
 
+      {modelLabOpen && (
+        <div className="overlay" role="presentation" onMouseDown={() => setModelLabOpen(false)}>
+          <section className="dialog model-lab-dialog" role="dialog" aria-modal="true" aria-label="모델 연구소" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="dialog-close" onClick={() => setModelLabOpen(false)} aria-label="닫기">×</button>
+            <header className="model-lab-header">
+              <div><p>Model intelligence</p><h2>최근 모델, 한눈에 비교</h2><span>순위 하나보다 실제 작업 적합도와 비용까지 같이 봅니다.</span></div>
+              <button type="button" onClick={() => void loadModelInsights()} disabled={modelInsightLoading}>{modelInsightLoading ? "갱신 중" : "순위 새로고침"}</button>
+            </header>
+
+            <div className="model-lab-status">
+              <span><i className={modelInsights?.liveArena ? "online" : ""} /> {modelInsights?.liveArena ? "Arena 공개 데이터 연결됨" : "검증된 최근 스냅샷"}</span>
+              <b>기준일 {modelInsights?.updatedAt ?? "확인 중"}</b>
+            </div>
+
+            <div className="model-lab-filters" role="tablist" aria-label="모델 비교 필터">
+              {modelInsightFilters.map((filter) => <button type="button" role="tab" aria-selected={modelInsightFilter === filter} className={modelInsightFilter === filter ? "active" : ""} key={filter} onClick={() => setModelInsightFilter(filter)}>{filter}</button>)}
+            </div>
+
+            {modelInsightLoading && !modelInsights && <div className="model-lab-loading"><TerracottaMark size="large" /><b>최신 순위를 모으고 있어요.</b><span>Text · Agent · WebDev · Vision · Search Arena를 확인합니다.</span></div>}
+            {!modelInsightLoading && !modelInsights && <div className="model-lab-loading"><b>평가 정보를 불러오지 못했어요.</b><span>잠시 뒤 순위 새로고침을 눌러주세요.</span></div>}
+
+            <div className="model-insight-grid">
+              {visibleModelInsights.map((model) => {
+                const metrics = arenaMetricOrder.filter((item) => model.arena[item.id]).slice(0, model.intelligenceIndex == null ? 4 : 3);
+                const availability = model.availability === "router" ? "라우터 대상" : model.availability === "watchlist" ? "관심 모델" : "창작 전용";
+                return (
+                  <article className={`model-insight-card ${model.availability}`} key={model.id}>
+                    <div className="model-card-head">
+                      <i>{model.mark}</i>
+                      <div><small>{model.provider}</small><h3>{model.name}</h3></div>
+                      <span>{availability}</span>
+                    </div>
+                    <p className="model-summary">{model.summary}</p>
+
+                    <div className="model-metrics">
+                      {model.intelligenceIndex != null && <span><small>AA 지능 지표</small><b>{model.intelligenceIndex}</b><em>{model.intelligenceNote}</em></span>}
+                      {metrics.map(({ id, label }) => {
+                        const metric = model.arena[id]!;
+                        return <span key={id} title={`${metric.modelName} · ${metric.sampleCount.toLocaleString("ko-KR")} samples`}><small>{label} Arena</small><b>#{metric.rank}</b><em>{metric.scoreLabel} · {metric.publishedAt.slice(5)}</em></span>;
+                      })}
+                      {metrics.length === 0 && model.intelligenceIndex == null && <span className="no-arena"><small>Arena</small><b>—</b><em>현재 공식 매칭 없음</em></span>}
+                    </div>
+
+                    <div className="model-best-for">{model.bestFor.map((item) => <span key={item}>{item}</span>)}</div>
+                    <div className="model-tradeoffs">
+                      <div><b>잘하는 것</b>{model.strengths.map((item) => <p key={item}>+ {item}</p>)}</div>
+                      <div><b>약한 것</b>{model.weaknesses.map((item) => <p key={item}>− {item}</p>)}</div>
+                    </div>
+                    <footer><span>{model.context}</span><span>{model.price}</span><a href={model.officialUrl} target="_blank" rel="noreferrer">공식 정보 ↗</a></footer>
+                  </article>
+                );
+              })}
+            </div>
+
+            {modelInsights && <div className="model-lab-sources"><p>{modelInsights.caveat}</p><div><span>출처</span>{modelInsights.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" title={source.note} key={source.name}>{source.name} ↗</a>)}</div></div>}
+          </section>
+        </div>
+      )}
+
       {settingsOpen && (
         <div className="overlay" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
           <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-label="모델 및 구독" onMouseDown={(event) => event.stopPropagation()}>
             <button className="dialog-close" onClick={() => setSettingsOpen(false)} aria-label="닫기">×</button>
             <header><p>Model router · 2026.07</p><h2>Terracotta Auto</h2><span>작업에 맞는 모델을 고르고, GPT와 Claude의 우선순위는 내가 정합니다.</span></header>
+
+            <button className="model-lab-entry" type="button" onClick={openModelLab}><span>◫</span><div><b>모델 연구소 열기</b><small>최신 모델의 장단점, 아레나 순위와 작업별 평가를 비교하세요.</small></div><em>비교하기 →</em></button>
 
             <div className="router-runtime">
               <div><i className={registryStatus?.connections.some((item) => item.configured) ? "online" : ""} /><span><b>{registryStatus?.latestPrimary?.model ?? "레지스트리 확인 중"}</b><small>{registryStatus ? `${registryStatus.syncIntervalHours}시간마다 공식 모델 목록 자동 갱신` : "백엔드 연결 상태를 불러오고 있어요"}</small></span></div>
