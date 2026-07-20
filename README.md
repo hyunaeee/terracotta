@@ -55,6 +55,40 @@ flowchart LR
   C --> S["Sparks · 가든 성장"]
 ```
 
+## 에이전트 오케스트레이션
+
+단순 프록시가 아니라, 요청마다 다단계 에이전트 루프가 돕니다 (`lib/terracotta-orchestrator.ts`):
+
+1. **라우팅** — 과제 분류(general/research/creative) 후 선호 설정과 최신 모델 랭킹으로 플래너 선택. 리서치성 요청은 Perplexity로 위임
+2. **도구 루프** — 연결된 MCP 도구를 플래너가 호출. 쓰기(write) 위험 도구는 즉시 실행하지 않고 **승인 대기**로 전환(만료 시간 포함), 요청당 도구 호출 상한 적용
+3. **교차 검토** — "교차 검증", "second opinion" 류 요청이면 **다른 공급사의 백업 모델**이 초안의 사실 오류·누락을 검토해 최종본 작성 (`reviewedBy`로 표기)
+4. **기록** — 모든 단계가 orchestration trace(route/tool/review)로 남고, 비용은 사용량 원장에 적립되어 월 예산 가드와 연동
+
+> 같은 원칙(다중 에이전트 협업 + 검증 + 평가)을 최소 형태로 정리한 레퍼런스: [agent-orchestra](https://github.com/hyunaeee/agent-orchestra)
+
+## 라우팅 정책 벤치마크
+
+라우팅이 실제로 무엇을 사주는지 계량하기 위한 오프라인 정책 벤치마크입니다
+(라이브 API 호출 없음 — 라우터의 정책 로직과 모델 레지스트리의 공식 가격 시드를 미러링):
+
+```bash
+node bench/routing-bench.mjs
+```
+
+24개 태스크(일반 8 · 리서치 8 · 창작 8), 문서화된 품질 루브릭 기준:
+
+| 정책 | 평균 품질 | 태스크당 비용 |
+|---|---|---|
+| **terracotta auto (latest-first)** | 0.967 | **$0.0138** |
+| terracotta claude-first | **1.000** | $0.0213 |
+| baseline: always GPT-5.6 | 0.833 | $0.0169 |
+| baseline: always Claude Fable 5 | 0.867 | $0.0289 |
+| baseline: always Sonnet 5 (저가 고정) | 0.867 | $0.0087 |
+
+- auto vs 최고가 단일 모델(Fable 5 고정): **비용 −52.4% · 품질 +11.5%**
+- auto vs GPT-5.6 고정: 비용 −18.7% · 품질 +16.1%
+- 저가 고정(Sonnet 5)보다 비싸지만 리서치·창작 품질을 포기하지 않음 — 라우팅의 존재 이유
+
 ## 기술 구성
 
 - Next.js 16 + React 19

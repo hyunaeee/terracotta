@@ -1,0 +1,49 @@
+[
+  {
+    "policy": "terracotta auto (latest-first)",
+    "avgQuality": 0.967,
+    "totalCostUsd": 0.3302,
+    "costPerTask": 0.01376,
+    "picks": {
+      "gpt-5.6": 16,
+      "sonar-pro": 8
+    }
+  },
+  {
+    "policy": "terracotta claude-first",
+    "avgQuality": 1,
+    "totalCostUsd": 0.511,
+    "costPerTask": 0.02129,
+    "picks": {
+      "claude-fable-5": 16,
+      "sonar-pro": 8
+    }
+  },
+  {
+    "policy": "baseline: always GPT-5.6",
+    "avgQuality": 0.833,
+    "totalCostUsd": 0.4063,
+    "costPerTask": 0.01693,
+    "picks": {
+      "gpt-5.6": 24
+    }
+  },
+  {
+    "policy": "baseline: always Claude Fable 5",
+    "avgQuality": 0.867,
+    "totalCostUsd": 0.693,
+    "costPerTask": 0.02887,
+    "picks": {
+      "claude-fable-5": 24
+    }
+  },
+  {
+    "policy": "baseline: always Sonnet 5 (cheap)",
+    "avgQuality": 0.867,
+    "totalCostUsd": 0.2079,
+    "costPerTask": 0.00866,
+    "picks": {
+      "claude-sonnet-5": 24
+    }
+  }
+]
