@@ -1,0 +1,42 @@
+NOTICE
+======
+
+This project is proprietary (see LICENSE). This file records third-party
+material bundled in the repository, which is NOT covered by that notice and
+remains under its own terms.
+
+Brand icons (public/assets/mcp/)
+-------------------------------
+The SVG icons in this directory are taken from the Simple Icons project
+(https://github.com/simple-icons/simple-icons), released under CC0-1.0.
+Simple Icons notes that CC0 does not waive trademark rights.
+
+All company names and logos referenced here — including GitHub, Slack, Notion,
+Figma, Linear, Google Drive, Atlassian, Asana, Airtable, Canva, Box, Stripe,
+PayPal, HubSpot, Intercom, Supabase, Vercel, Sentry, Grafana, Cloudflare,
+GitLab, Postman, Microsoft Learn, Hugging Face, Exa and Context7 — are
+trademarks of their respective owners. They are used here only to identify the
+services this project can connect to. This project is not affiliated with,
+endorsed by, or sponsored by any of them.
+
+Generated imagery
+-----------------
+The mascot, growth-stage and Open Graph images (public/og*.png,
+public/assets/orbit-*.png, terracotta-*.png) were produced with OpenAI's
+image model and carry C2PA content credentials identifying them as
+AI-generated. No claim of authorship is made over these files, and their
+provenance metadata should not be stripped.
+
+Model and benchmark data
+------------------------
+Model rankings and intelligence scores are retrieved from, or seeded from,
+LM Arena and Artificial Analysis. Those datasets remain under their
+publishers' terms.
+
+Scaffold assets
+---------------
+public/file.svg, public/globe.svg and public/window.svg are unmodified
+`create-next-app` scaffold assets (Vercel / Next.js, MIT).
+
+Runtime dependencies are installed from their own distributions and remain
+under their own licenses.
