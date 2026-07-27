@@ -1,4 +1,5 @@
 import { callMcpTool, listMcpConnections, ownerId } from "./mcp-hub";
+import { connectedLocalAgentTools, runLocalAgentTool } from "./local-agent";
 import {
   chooseLatestFrontier,
   classifyTask,
@@ -39,7 +40,7 @@ type RawMcpTool = {
 
 type OrchestratorTool = {
   alias: string;
-  kind: "mcp" | "perplexity";
+  kind: "mcp" | "perplexity" | "local_shell";
   connectionId: string | null;
   connectionName: string;
   toolName: string;
@@ -188,8 +189,11 @@ async function recordEvent(request: Request, runId: string, event: {
 }
 
 async function connectedTools(request: Request) {
-  const connections = await listMcpConnections(request) as Array<Record<string, unknown> & { tools?: RawMcpTool[] }>;
-  const tools: OrchestratorTool[] = [];
+  const [connections, localTools] = await Promise.all([
+    listMcpConnections(request) as Promise<Array<Record<string, unknown> & { tools?: RawMcpTool[] }>>,
+    connectedLocalAgentTools(request),
+  ]);
+  const tools: OrchestratorTool[] = [...localTools];
   const usedAliases = new Set<string>();
   for (const item of connections) {
     if (item.status !== "connected") continue;
@@ -303,14 +307,18 @@ async function executeTool(request: Request, runId: string, prompt: string, task
       const invocation = await invokePerplexity(runtimeEnv().PERPLEXITY_API_KEY!, query);
       costMicros = await recordUsage(runtimeEnv().DB, invocation, task, models.find((item) => item.provider === "perplexity"));
       output = safeJson({ answer: invocation.text, citations: invocation.citations ?? [] });
+    } else if (call.tool.kind === "local_shell") {
+      output = safeJson(await runLocalAgentTool(request, runId, call.tool.connectionId!, call.args));
     } else {
       output = safeJson(await callMcpTool(request, call.tool.connectionId!, call.tool.toolName, call.args));
     }
-    await recordEvent(request, runId, { type: "tool", provider: call.tool.kind === "perplexity" ? "perplexity" : "mcp", connectionId: call.tool.connectionId, tool: call.tool.toolName, risk: call.tool.risk, status: "completed", input: call.args, output });
+    const toolProvider = call.tool.kind === "perplexity" ? "perplexity" : call.tool.kind === "local_shell" ? "local-agent" : "mcp";
+    await recordEvent(request, runId, { type: "tool", provider: toolProvider, connectionId: call.tool.connectionId, tool: call.tool.toolName, risk: call.tool.risk, status: "completed", input: call.args, output });
     return { result: { callId: call.callId, output, isError: false }, costMicros };
   } catch (error) {
     const output = safeJson({ error: error instanceof Error ? error.message : "tool failed" });
-    await recordEvent(request, runId, { type: "tool", provider: call.tool.kind === "perplexity" ? "perplexity" : "mcp", connectionId: call.tool.connectionId, tool: call.tool.toolName, risk: call.tool.risk, status: "failed", input: call.args, output });
+    const toolProvider = call.tool.kind === "perplexity" ? "perplexity" : call.tool.kind === "local_shell" ? "local-agent" : "mcp";
+    await recordEvent(request, runId, { type: "tool", provider: toolProvider, connectionId: call.tool.connectionId, tool: call.tool.toolName, risk: call.tool.risk, status: "failed", input: call.args, output });
     return { result: { callId: call.callId, output, isError: true }, costMicros: 0 };
   }
 }

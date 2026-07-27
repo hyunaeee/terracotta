@@ -134,8 +134,11 @@ test("adds a sourced, live-updating model intelligence lab", async () => {
   assert.match(page, /Arena 공개 데이터 연결됨/);
   assert.match(page, /잘하는 것/);
   assert.match(page, /약한 것/);
+  assert.match(page, /전체 모델 요약/);
+  assert.match(page, /모델 핵심 비교/);
   assert.match(css, /\.model-insight-grid/);
   assert.match(css, /\.model-metrics/);
+  assert.match(css, /\.model-compare-table/);
   assert.match(intelligence, /lmarena-ai%2Fleaderboard-dataset/);
   assert.match(intelligence, /Artificial Analysis/);
   assert.match(intelligence, /Claude Fable 5/);
@@ -144,6 +147,48 @@ test("adds a sourced, live-updating model intelligence lab", async () => {
   assert.match(intelligence, /Kimi K3/);
   assert.match(intelligence, /AbortSignal\.timeout/);
   assert.match(route, /s-maxage=21600/);
+});
+
+test("pairs cross-platform local terminals through an approval-only outbound agent", async () => {
+  const [agent, orchestrator, page, css, schema, browserRoute, workerRoute, script, migration, productionCompose, caddy] = await Promise.all([
+    source("lib/local-agent.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("db/schema.ts"),
+    source("app/api/local-agent/route.ts"),
+    source("app/api/local-agent/worker/route.ts"),
+    source("public/terracotta-local-agent.mjs"),
+    source("drizzle/0006_chubby_karnak.sql"),
+    source("compose.production.yaml"),
+    source("deploy/Caddyfile"),
+  ]);
+
+  assert.match(agent, /SHA-256/);
+  assert.match(agent, /local_agent_jobs/);
+  assert.match(agent, /connectedLocalAgentTools/);
+  assert.match(agent, /risk: "write"/);
+  assert.match(agent, /runLocalAgentTool/);
+  assert.match(orchestrator, /local_shell/);
+  assert.match(orchestrator, /runLocalAgentTool/);
+  assert.match(page, /로컬 터미널/);
+  assert.match(page, /PowerShell/);
+  assert.match(page, /macOS \/ Linux/);
+  assert.match(css, /\.local-agent-dialog/);
+  assert.match(schema, /localAgents/);
+  assert.match(schema, /localAgentJobs/);
+  assert.match(browserRoute, /createLocalAgent/);
+  assert.match(workerRoute, /handleLocalAgentRequest/);
+  assert.match(script, /process\.platform === "win32"/);
+  assert.match(script, /\/bin\/zsh/);
+  assert.match(script, /insideWorkspace/);
+  assert.match(script, /blockedCommand/);
+  assert.match(script, /NonInteractive/);
+  assert.match(migration, /CREATE TABLE `local_agents`/);
+  assert.match(migration, /CREATE TABLE `local_agent_jobs`/);
+  assert.match(productionCompose, /oauth2-proxy/);
+  assert.match(productionCompose, /terracotta-data/);
+  assert.match(caddy, /X-Auth-Request-Email>oai-authenticated-user-email/);
 });
 
 test("orchestrates models and MCP tools with durable write approval", async () => {

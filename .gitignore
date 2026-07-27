@@ -32,6 +32,7 @@ yarn-error.log*
 .env*
 !.env.example
 !.env.selfhost.example
+!.env.production.example
 
 # vercel
 .vercel

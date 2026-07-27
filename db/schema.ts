@@ -175,3 +175,33 @@ export const teamHandoffs = sqliteTable("team_handoffs", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   acceptedAt: text("accepted_at"),
 });
+
+export const localAgents = sqliteTable("local_agents", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  platform: text("platform"),
+  shell: text("shell"),
+  workspace: text("workspace"),
+  lastSeenAt: text("last_seen_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  revokedAt: text("revoked_at"),
+});
+
+export const localAgentJobs = sqliteTable("local_agent_jobs", {
+  id: text("id").primaryKey(),
+  agentId: text("agent_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  runId: text("run_id"),
+  command: text("command").notNull(),
+  cwd: text("cwd").notNull().default("."),
+  timeoutSeconds: integer("timeout_seconds").notNull().default(30),
+  status: text("status").notNull().default("queued"),
+  stdout: text("stdout").notNull().default(""),
+  stderr: text("stderr").notNull().default(""),
+  exitCode: integer("exit_code"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+});

@@ -165,6 +165,34 @@ type McpConnection = {
   last_checked_at: string | null;
   error: string | null;
 };
+type LocalAgent = {
+  id: string;
+  name: string;
+  platform: string | null;
+  shell: string | null;
+  workspace: string | null;
+  online: boolean;
+  lastSeenAt: string | null;
+  createdAt: string;
+};
+type LocalAgentJob = {
+  id: string;
+  agentId: string;
+  command: string;
+  cwd: string;
+  status: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+type LocalAgentDashboard = {
+  agents: LocalAgent[];
+  jobs: LocalAgentJob[];
+  connected: boolean;
+  error?: string;
+};
 
 const mcpTemplates = [
   { name: "Shopify Storefront", url: "https://your-shop.myshopify.com/api/mcp", note: "your-shop을 실제 스토어 주소로 변경" },
@@ -266,6 +294,14 @@ export default function Home() {
   const [mcpCategory, setMcpCategory] = useState("전체");
   const [mcpSetupId, setMcpSetupId] = useState<string | null>(null);
   const [mcpCredentials, setMcpCredentials] = useState({ clientId: "", clientSecret: "" });
+  const [localAgentOpen, setLocalAgentOpen] = useState(false);
+  const [localAgents, setLocalAgents] = useState<LocalAgent[]>([]);
+  const [localAgentJobs, setLocalAgentJobs] = useState<LocalAgentJob[]>([]);
+  const [localAgentBusy, setLocalAgentBusy] = useState(false);
+  const [localAgentName, setLocalAgentName] = useState("내 컴퓨터");
+  const [localAgentToken, setLocalAgentToken] = useState<string | null>(null);
+  const [localAgentPlatform, setLocalAgentPlatform] = useState<"windows" | "mac">("windows");
+  const [localAgentNote, setLocalAgentNote] = useState("연결 후 채팅에서 파일 수정·빌드·테스트를 요청할 수 있어요.");
   const [modelPreference, setModelPreference] = useState<ModelPreference>("latest");
   const [registryStatus, setRegistryStatus] = useState<RegistryStatus | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
@@ -478,6 +514,68 @@ export default function Home() {
     }
   }
 
+  async function loadLocalAgents() {
+    setLocalAgentBusy(true);
+    try {
+      const response = await fetch("/api/local-agent", { cache: "no-store" });
+      const payload = await response.json() as LocalAgentDashboard;
+      if (!response.ok) throw new Error(payload.error || "로컬 연결을 불러오지 못했어요.");
+      setLocalAgents(payload.agents ?? []);
+      setLocalAgentJobs(payload.jobs ?? []);
+      if (payload.connected) setLocalAgentNote("로컬 터미널이 온라인입니다. 채팅에서 필요한 작업을 요청하세요.");
+    } catch (error) {
+      setLocalAgentNote(error instanceof Error ? error.message : "로컬 연결을 불러오지 못했어요.");
+    } finally {
+      setLocalAgentBusy(false);
+    }
+  }
+
+  function openLocalAgent() {
+    setLocalAgentOpen(true);
+    setMobileMenu(false);
+    void loadLocalAgents();
+  }
+
+  async function pairLocalAgent() {
+    if (localAgentBusy) return;
+    setLocalAgentBusy(true);
+    try {
+      const response = await fetch("/api/local-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "pair", name: localAgentName }),
+      });
+      const payload = await response.json() as { token?: string; error?: string };
+      if (!response.ok || !payload.token) throw new Error(payload.error || "연결 키를 만들지 못했어요.");
+      setLocalAgentToken(payload.token);
+      setLocalAgentNote("한 번만 표시되는 연결 키를 만들었어요. 아래 명령을 연결할 컴퓨터에서 실행하세요.");
+      await loadLocalAgents();
+    } catch (error) {
+      setLocalAgentNote(error instanceof Error ? error.message : "연결 키를 만들지 못했어요.");
+    } finally {
+      setLocalAgentBusy(false);
+    }
+  }
+
+  async function revokeLocalAgent(id: string) {
+    setLocalAgentBusy(true);
+    try {
+      const response = await fetch("/api/local-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "revoke", id }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "연결을 해제하지 못했어요.");
+      setLocalAgentNote("해당 컴퓨터의 연결 키와 대기 작업을 해제했어요.");
+      await loadLocalAgents();
+    } catch (error) {
+      setLocalAgentNote(error instanceof Error ? error.message : "연결을 해제하지 못했어요.");
+    } finally {
+      setLocalAgentBusy(false);
+    }
+  }
+
   function openMcpHub() {
     setMcpOpen(true);
     setMobileMenu(false);
@@ -584,6 +682,12 @@ export default function Home() {
   const gardenCategories = useMemo(() => ["전체", ...Array.from(new Set(gardenShop.map((item) => item.category)))], []);
   const visibleGardenItems = useMemo(() => gardenShop.filter((item) => shopCategory === "전체" || item.category === shopCategory), [shopCategory]);
   const visibleModelInsights = useMemo(() => (modelInsights?.models ?? []).filter((model) => modelInsightFilter === "전체" || model.categories.includes(modelInsightFilter)), [modelInsightFilter, modelInsights]);
+  const localAgentOrigin = ready && typeof window !== "undefined" ? window.location.origin : "https://your-terracotta.example";
+  const localAgentCommand = localAgentToken
+    ? localAgentPlatform === "windows"
+      ? `Invoke-WebRequest "${localAgentOrigin}/terracotta-local-agent.mjs" -OutFile ".\\terracotta-local-agent.mjs"\nnode .\\terracotta-local-agent.mjs --server "${localAgentOrigin}" --token "${localAgentToken}" --workspace .`
+      : `curl -fsSL "${localAgentOrigin}/terracotta-local-agent.mjs" -o terracotta-local-agent.mjs\nnode ./terracotta-local-agent.mjs --server "${localAgentOrigin}" --token "${localAgentToken}" --workspace .`
+    : "";
   const mcpCategories = useMemo(() => ["전체", ...Array.from(new Set(mcpConnections.map((item) => item.category)))], [mcpConnections]);
   const visibleMcpConnections = useMemo(() => {
     const query = mcpQuery.trim().toLowerCase();
@@ -833,6 +937,7 @@ export default function Home() {
           <button className="active" onClick={() => setMobileMenu(false)}><span>○</span> 대화</button>
           <button onClick={() => { setGardenOpen(true); setMobileMenu(false); }}><span>♧</span> 테라코타 가든</button>
           <button onClick={openMcpHub}><span>⌁</span> MCP 연결</button>
+          <button onClick={openLocalAgent}><span>›_</span> 로컬 터미널</button>
           <button onClick={openModelLab}><span>◫</span> 모델 연구소</button>
           <button onClick={() => { setSettingsOpen(true); setMobileMenu(false); }}><span>⌘</span> 모델 및 구독</button>
         </nav>
@@ -1229,6 +1334,77 @@ export default function Home() {
         </div>
       )}
 
+      {localAgentOpen && (
+        <div className="overlay" role="presentation" onMouseDown={() => setLocalAgentOpen(false)}>
+          <section className="dialog local-agent-dialog" role="dialog" aria-modal="true" aria-label="로컬 터미널 연결" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="dialog-close" onClick={() => setLocalAgentOpen(false)} aria-label="닫기">×</button>
+            <header>
+              <p>Terracotta Local Agent</p>
+              <h2>내 컴퓨터에서 안전하게 실행</h2>
+              <span>Windows PowerShell, macOS zsh, Linux bash를 자동으로 감지합니다.</span>
+            </header>
+
+            <div className="local-agent-safety">
+              <span>1</span><div><b>명령을 먼저 확인</b><small>모델이 제안한 명령과 작업 경로를 채팅에서 보여줍니다.</small></div>
+              <span>2</span><div><b>승인 후에만 실행</b><small>승인하지 않은 명령은 컴퓨터로 전달되지 않습니다.</small></div>
+              <span>3</span><div><b>작업 폴더 안에서만</b><small>시스템 명령, 관리자 권한, 폴더 밖 경로를 로컬에서 다시 차단합니다.</small></div>
+            </div>
+
+            <div className="local-agent-toolbar">
+              <p>{localAgentNote}</p>
+              <button type="button" onClick={() => void loadLocalAgents()} disabled={localAgentBusy}>{localAgentBusy ? "확인 중" : "상태 새로고침"}</button>
+            </div>
+
+            {localAgents.length > 0 && (
+              <div className="local-agent-list">
+                {localAgents.map((agent) => (
+                  <article key={agent.id}>
+                    <i className={agent.online ? "online" : ""} />
+                    <div><b>{agent.name}</b><small>{agent.shell ?? "연결 대기"}{agent.workspace ? ` · ${agent.workspace}` : ""}</small></div>
+                    <em>{agent.online ? "온라인" : "오프라인"}</em>
+                    <button type="button" onClick={() => void revokeLocalAgent(agent.id)} disabled={localAgentBusy}>연결 해제</button>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            <section className="local-agent-pair">
+              <div className="local-agent-section-head">
+                <div><h3>새 컴퓨터 연결</h3><p>Node.js 20 이상이 설치된 터미널에서 두 줄을 실행합니다.</p></div>
+                <div className="local-platform-tabs">
+                  <button type="button" className={localAgentPlatform === "windows" ? "active" : ""} onClick={() => setLocalAgentPlatform("windows")}>Windows</button>
+                  <button type="button" className={localAgentPlatform === "mac" ? "active" : ""} onClick={() => setLocalAgentPlatform("mac")}>macOS / Linux</button>
+                </div>
+              </div>
+              <div className="local-agent-name-row">
+                <input value={localAgentName} onChange={(event) => setLocalAgentName(event.target.value)} maxLength={50} placeholder="예: 회사 노트북" aria-label="컴퓨터 이름" />
+                <button type="button" onClick={() => void pairLocalAgent()} disabled={localAgentBusy}>연결 키 만들기</button>
+              </div>
+              {localAgentToken && (
+                <div className="local-agent-command">
+                  <div><b>{localAgentPlatform === "windows" ? "PowerShell" : "Terminal"}에 붙여넣기</b><small>키는 이 화면에서만 다시 볼 수 있어요.</small></div>
+                  <pre><code>{localAgentCommand}</code></pre>
+                  <button type="button" onClick={() => void navigator.clipboard.writeText(localAgentCommand)}>명령 복사</button>
+                </div>
+              )}
+            </section>
+
+            {localAgentJobs.length > 0 && (
+              <section className="local-agent-history">
+                <div className="local-agent-section-head"><div><h3>최근 실행</h3><p>누가 어떤 명령을 승인했는지 결과와 함께 남습니다.</p></div></div>
+                {localAgentJobs.slice(0, 6).map((job) => (
+                  <details key={job.id}>
+                    <summary><code>{job.command}</code><span className={job.status}>{job.status === "completed" ? "완료" : job.status === "running" ? "실행 중" : job.status === "queued" ? "대기" : "확인 필요"}</span></summary>
+                    <small>{job.cwd} · exit {job.exitCode ?? "—"}</small>
+                    {(job.stdout || job.stderr) && <pre>{job.stdout || job.stderr}</pre>}
+                  </details>
+                ))}
+              </section>
+            )}
+          </section>
+        </div>
+      )}
+
       {modelLabOpen && (
         <div className="overlay" role="presentation" onMouseDown={() => setModelLabOpen(false)}>
           <section className="dialog model-lab-dialog" role="dialog" aria-modal="true" aria-label="모델 연구소" onMouseDown={(event) => event.stopPropagation()}>
@@ -1249,6 +1425,26 @@ export default function Home() {
 
             {modelInsightLoading && !modelInsights && <div className="model-lab-loading"><TerracottaMark size="large" /><b>최신 순위를 모으고 있어요.</b><span>Text · Agent · WebDev · Vision · Search Arena를 확인합니다.</span></div>}
             {!modelInsightLoading && !modelInsights && <div className="model-lab-loading"><b>평가 정보를 불러오지 못했어요.</b><span>잠시 뒤 순위 새로고침을 눌러주세요.</span></div>}
+
+            {visibleModelInsights.length > 0 && (
+              <section className="model-compare">
+                <div className="model-compare-title"><div><b>{modelInsightFilter === "전체" ? "전체 모델 요약" : `${modelInsightFilter} 추천 모델`}</b><small>강점, 대표 평가, 가격을 먼저 비교한 뒤 아래 상세 설명을 확인하세요.</small></div><span>{visibleModelInsights.length}개 모델</span></div>
+                <div className="model-compare-table" role="table" aria-label="모델 핵심 비교">
+                  <div className="model-compare-row heading" role="row"><span>모델</span><span>가장 잘하는 일</span><span>대표 평가</span><span>비용</span></div>
+                  {visibleModelInsights.map((model) => {
+                    const firstArena = arenaMetricOrder.map(({ id, label }) => ({ metric: model.arena[id], label })).find((item) => item.metric);
+                    return (
+                      <div className="model-compare-row" role="row" key={`compare-${model.id}`}>
+                        <span><i>{model.mark}</i><b>{model.name}</b><small>{model.provider}</small></span>
+                        <span><b>{model.bestFor[0] ?? model.categories[0] ?? "범용 작업"}</b><small>{model.summary}</small></span>
+                        <span><b>{model.intelligenceIndex != null ? `AA ${model.intelligenceIndex}` : firstArena?.metric ? `${firstArena.label} #${firstArena.metric.rank}` : "공식 지표 없음"}</b><small>{model.intelligenceIndex != null && firstArena?.metric ? `${firstArena.label} Arena #${firstArena.metric.rank}` : model.context}</small></span>
+                        <span><b>{model.price}</b><small>{model.context}</small></span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
             <div className="model-insight-grid">
               {visibleModelInsights.map((model) => {

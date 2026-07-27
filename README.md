@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://orbit-ai-companion.likecorp817.chatgpt.site">Live prototype</a>
+  <a href="./DEPLOYMENT.md">Production deployment</a>
   ·
   <a href="./SELF_HOSTING.md">Self-host with Docker</a>
   ·
@@ -43,6 +43,8 @@ Terracotta는 GPT, Claude, Perplexity, Higgsfield처럼 서로 다른 강점을 
 - **보안 중심 MCP OAuth** — PKCE S256, AES-GCM 토큰 암호화, HTTPS 전용 연결과 내부 네트워크 주소 차단을 적용합니다.
 - **구독 프로토타입** — 모델·검색·이미지·영상 사용량을 함께 고려한 크레딧 플랜과 월간 공급사 비용 가드를 제공합니다.
 - **한 명령 셀프호스팅** — Docker Compose로 웹 버전과 같은 Worker 앱을 실행하고 D1·MCP 암호화 키를 전용 볼륨에 보존합니다.
+- **Windows·macOS·Linux 로컬 에이전트** — 배포 사이트와 각 컴퓨터를 아웃바운드로 연결하고, 승인한 명령만 PowerShell·zsh·bash에서 작업 폴더 안에 실행합니다.
+- **독립 운영 배포** — Docker, Caddy 자동 HTTPS, GitHub 팀 로그인과 영구 볼륨을 묶어 `chatgpt.site` 없이 자체 도메인으로 운영합니다.
 
 ## 제품 흐름
 
@@ -106,7 +108,8 @@ node bench/routing-bench.mjs
 - Cloudflare D1 + Drizzle ORM
 - 공급사별 모델 레지스트리 및 사용량 원장
 - Streamable HTTP MCP + OAuth 2.0/PKCE
-- OpenAI Sites 배포 설정
+- Docker + GitHub Container Registry
+- Caddy 자동 HTTPS + GitHub OAuth 팀 로그인
 
 ## 로컬에서 실행하기
 
@@ -122,6 +125,8 @@ docker compose up -d --build
 브라우저에서 [http://localhost:3000](http://localhost:3000)을 열면 됩니다. Windows PowerShell에서는 `cp` 대신 `Copy-Item`을 사용하세요. 데이터는 `terracotta-data` 볼륨에 유지되고 MCP 토큰 암호화 키는 최초 실행 때 자동 생성됩니다.
 
 업데이트, 백업, 외부 공개 전 보안 설정은 [셀프호스팅 가이드](./SELF_HOSTING.md)에 정리되어 있습니다.
+
+자체 도메인과 GitHub 팀 로그인을 붙이는 운영 배포는 [독립 배포 가이드](./DEPLOYMENT.md)를 따르세요.
 
 ### 개발 서버로 실행
 
@@ -172,6 +177,7 @@ API 키는 서버 환경변수로만 설정하고 `NEXT_PUBLIC_` 접두사를 �
 | `npm run lint` | 코드 정적 검사 |
 | `npm run db:generate` | Drizzle 마이그레이션 생성 |
 | `docker compose up -d --build` | 셀프호스트 앱 빌드 및 백그라운드 실행 |
+| `docker compose --env-file .env.production -f compose.production.yaml up -d --build` | 자체 도메인 운영 배포 |
 
 ## 프로젝트 구조
 
