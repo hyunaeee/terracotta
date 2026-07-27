@@ -155,3 +155,23 @@ export const contextRunLinks = sqliteTable("context_run_links", {
   ownerId: text("owner_id").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const workSessionMembers = sqliteTable("work_session_members", {
+  sessionId: text("session_id").notNull(),
+  memberEmail: text("member_email").notNull(),
+  role: text("role").notNull().default("editor"),
+  invitedBy: text("invited_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [primaryKey({ columns: [table.sessionId, table.memberEmail] })]);
+
+export const teamHandoffs = sqliteTable("team_handoffs", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  fromEmail: text("from_email").notNull(),
+  toEmail: text("to_email").notNull(),
+  note: text("note").notNull().default(""),
+  status: text("status").notNull().default("pending"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  acceptedAt: text("accepted_at"),
+});

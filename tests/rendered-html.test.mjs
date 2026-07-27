@@ -212,3 +212,32 @@ test("persists provider-neutral work context and hands it between GPT and Claude
   assert.match(migration, /CREATE TABLE `work_turns`/);
   assert.match(migration, /CREATE TABLE `context_handoffs`/);
 });
+
+test("shares work sessions with role-based team handoffs", async () => {
+  const [context, contextRoute, page, css, schema, migration] = await Promise.all([
+    source("lib/work-context.ts"),
+    source("app/api/context/route.ts"),
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("db/schema.ts"),
+    source("drizzle/0005_famous_magik.sql"),
+  ]);
+
+  assert.match(context, /work_session_members/);
+  assert.match(context, /team_handoffs/);
+  assert.match(context, /assertCanEdit/);
+  assert.match(context, /session\.access_role === "viewer"/);
+  assert.match(context, /shareWorkSession/);
+  assert.match(context, /handoffWorkSession/);
+  assert.match(context, /acceptTeamHandoff/);
+  assert.match(contextRoute, /action\?: "new" \| "share" \| "handoff" \| "revoke" \| "accept"/);
+  assert.match(page, /팀 공유/);
+  assert.match(page, /초대하고 넘기기/);
+  assert.match(page, /보기 전용 작업입니다/);
+  assert.match(css, /\.team-dialog/);
+  assert.match(css, /\.incoming-handoff/);
+  assert.match(schema, /workSessionMembers/);
+  assert.match(schema, /teamHandoffs/);
+  assert.match(migration, /CREATE TABLE `work_session_members`/);
+  assert.match(migration, /CREATE TABLE `team_handoffs`/);
+});

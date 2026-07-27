@@ -1,6 +1,6 @@
 import { env as cloudflareEnv } from "cloudflare:workers";
 
-type McpEnv = { DB: D1Database; MCP_TOKEN_ENCRYPTION_KEY?: string };
+type McpEnv = { DB: D1Database; MCP_TOKEN_ENCRYPTION_KEY?: string; TERRACOTTA_SELF_HOSTED?: string; TERRACOTTA_TRUST_AUTH_HEADERS?: string };
 type Connection = {
   id: string; owner_id: string; name: string; server_url: string; category: string; status: string; auth_type: string;
   tool_count: number; tools_json: string; encrypted_access_token: string | null; encrypted_refresh_token: string | null;
@@ -54,7 +54,11 @@ const schema = [
 ];
 
 function env() { return cloudflareEnv as unknown as McpEnv; }
-export function ownerId(request: Request) { return request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() || "owner"; }
+export function ownerId(request: Request) {
+  const environment = env();
+  if (environment.TERRACOTTA_SELF_HOSTED === "true" && environment.TERRACOTTA_TRUST_AUTH_HEADERS !== "true") return "owner";
+  return request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() || "owner";
+}
 function safeMessage(error: unknown) { return (error instanceof Error ? error.message : "MCP connection failed").slice(0, 260); }
 
 function assertSafeUrl(value: string) {

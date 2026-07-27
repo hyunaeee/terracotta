@@ -30,6 +30,7 @@ Terracotta는 GPT, Claude, Perplexity, Higgsfield처럼 서로 다른 강점을 
 
 - **멀티 모델 라우터** — OpenAI, Anthropic, Perplexity, Higgsfield 연결 상태와 사용량 예산을 한곳에서 관리합니다.
 - **GPT ↔ Claude 공용 작업 기억** — 대화·최종 결과·검증된 도구 기록을 Terracotta 소유의 D1 세션에 저장해 모델을 바꿔도 같은 작업을 이어갑니다.
+- **팀 작업 공유와 인계** — 작업별로 팀원을 이메일로 초대해 보기·편집 권한을 나누고, 인계 메모와 함께 같은 AI 작업 기록을 넘겨받습니다.
 - **자동 오케스트레이터** — 질문을 분석해 모델과 연결된 MCP 도구를 선택하고, 읽기 도구는 자동 실행한 뒤 결과를 다시 모델이 검증·정리합니다.
 - **안전한 실행 승인** — 메시지 전송·수정·삭제처럼 외부 상태를 바꾸는 작업은 서비스·도구·인자를 보여준 뒤 사용자 승인으로만 실행합니다.
 - **자동 모델 레지스트리** — 연결된 공급사의 모델 목록을 주기적으로 확인하고 최신 우선순위를 갱신합니다.
@@ -47,7 +48,8 @@ Terracotta는 GPT, Claude, Perplexity, Higgsfield처럼 서로 다른 강점을 
 
 ```mermaid
 flowchart LR
-  U["사용자 요청"] --> M["Terracotta 공용 작업 기억"]
+  T["팀원 · 역할별 접근"] --> M["Terracotta 공용 작업 기억"]
+  U["사용자 요청"] --> M
   M --> R["Terracotta Router"]
   R --> O["OpenAI"]
   R --> A["Anthropic"]
@@ -69,7 +71,8 @@ flowchart LR
 2. **도구 루프** — 연결된 MCP 도구를 플래너가 호출. 쓰기(write) 위험 도구는 즉시 실행하지 않고 **승인 대기**로 전환(만료 시간 포함), 요청당 도구 호출 상한 적용
 3. **교차 검토** — "교차 검증", "second opinion" 류 요청이면 **다른 공급사의 백업 모델**이 초안의 사실 오류·누락을 검토해 최종본 작성 (`reviewedBy`로 표기)
 4. **컨텍스트 인계** — 모델이 바뀌면 사용자에게 보인 대화·최종 출력·검증된 도구 요약만 공용 세션에서 넘기며, 비공개 추론 과정은 전달하지 않음
-5. **기록** — 모든 단계가 orchestration trace(route/tool/review/handoff)로 남고, 비용은 사용량 원장에 적립되어 월 예산 가드와 연동
+5. **팀 인계** — 소유자는 이메일별 보기·편집 권한을 관리하고, 편집 가능한 팀원끼리 인계 메모와 현재 작업 기록을 주고받음
+6. **기록** — 모든 단계가 orchestration trace(route/tool/review/handoff)로 남고, 비용은 사용량 원장에 적립되어 월 예산 가드와 연동
 
 > 같은 원칙(다중 에이전트 협업 + 검증 + 평가)을 최소 형태로 정리한 레퍼런스: [agent-orchestra](https://github.com/hyunaeee/agent-orchestra)
 
@@ -149,6 +152,7 @@ npm run dev
 | `HIGGSFIELD_MCP_CONNECTED` | Higgsfield MCP 인증 상태 |
 | `TERRACOTTA_MONTHLY_BUDGET_USD` | 월간 공급사 비용 한도 |
 | `MCP_TOKEN_ENCRYPTION_KEY` | MCP OAuth 토큰 암호화용 32바이트 base64 키 |
+| `TERRACOTTA_TRUST_AUTH_HEADERS` | 신뢰 가능한 로그인 프록시가 있을 때만 셀프호스트 팀 이메일 식별 활성화 |
 
 암호화 키 예시:
 

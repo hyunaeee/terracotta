@@ -109,8 +109,20 @@ type ApprovalRequest = {
   actions: Array<{ service: string; tool: string; arguments: Record<string, unknown> }>;
   status?: "pending" | "running" | "approved" | "rejected";
 };
-type Message = { role: "user" | "assistant"; text: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest };
-type ContextSession = { id: string; title: string; lastProvider: string | null };
+type SessionRole = "owner" | "editor" | "viewer";
+type Message = { role: "user" | "assistant"; text: string; author?: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest };
+type ContextSession = { id: string; title: string; lastProvider: string | null; ownerEmail?: string; role?: SessionRole };
+type TeamMember = { email: string; role: SessionRole; invitedBy: string | null; createdAt: string };
+type TeamHandoff = { id: string; fromEmail: string; toEmail: string; note: string; status: "pending" | "accepted"; createdAt: string };
+type ContextPayload = {
+  currentUser: string;
+  session: ContextSession | null;
+  messages: Message[];
+  members: TeamMember[];
+  handoffs: TeamHandoff[];
+  recentSessions: ContextSession[];
+  error?: string;
+};
 type AssistantPayload = {
   text?: string;
   model?: string;
@@ -218,6 +230,15 @@ export default function Home() {
   const [lastContextProvider, setLastContextProvider] = useState<string | null>(null);
   const [recentSessions, setRecentSessions] = useState<ContextSession[]>([]);
   const [contextLoading, setContextLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState("owner");
+  const [sessionRole, setSessionRole] = useState<SessionRole>("owner");
+  const [sessionOwner, setSessionOwner] = useState("owner");
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamHandoffs, setTeamHandoffs] = useState<TeamHandoff[]>([]);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [teamBusy, setTeamBusy] = useState(false);
+  const [teamMessage, setTeamMessage] = useState("팀원을 초대하거나 편집 가능한 팀원에게 작업을 넘길 수 있어요.");
+  const [teamForm, setTeamForm] = useState<{ email: string; role: "editor" | "viewer"; note: string }>({ email: "", role: "editor", note: "" });
   const [isWorking, setIsWorking] = useState(false);
   const [sparks, setSparks] = useState(100000);
   const [growth, setGrowth] = useState(0);
@@ -346,27 +367,73 @@ export default function Home() {
     void loadWorkContext();
   }, [ready]);
 
+  function applyContextPayload(payload: ContextPayload, replaceMessages = true) {
+    setCurrentUser(payload.currentUser || "owner");
+    setSessionId(payload.session?.id ?? null);
+    setSessionTitle(payload.session?.title ?? "새 작업");
+    setSessionOwner(payload.session?.ownerEmail ?? payload.currentUser ?? "owner");
+    setSessionRole(payload.session?.role ?? "owner");
+    setLastContextProvider(payload.session?.lastProvider ?? null);
+    if (replaceMessages) setMessages(payload.messages ?? []);
+    setTeamMembers(payload.members ?? []);
+    setTeamHandoffs(payload.handoffs ?? []);
+    setRecentSessions(payload.recentSessions ?? []);
+  }
+
   async function loadWorkContext(targetSessionId?: string) {
     setContextLoading(true);
     try {
       const query = targetSessionId ? `?sessionId=${encodeURIComponent(targetSessionId)}` : "";
       const response = await fetch(`/api/context${query}`, { cache: "no-store" });
       if (!response.ok) throw new Error("context unavailable");
-      const payload = await response.json() as {
-        session: ContextSession | null;
-        messages: Message[];
-        recentSessions: ContextSession[];
-      };
-      setSessionId(payload.session?.id ?? null);
-      setSessionTitle(payload.session?.title ?? "새 작업");
-      setLastContextProvider(payload.session?.lastProvider ?? null);
-      setMessages(payload.messages ?? []);
-      setRecentSessions(payload.recentSessions ?? []);
+      applyContextPayload(await response.json() as ContextPayload);
       setMobileMenu(false);
     } catch {
       setSessionId(null);
     } finally {
       setContextLoading(false);
+    }
+  }
+
+  async function runTeamAction(body: Record<string, unknown>) {
+    if (!sessionId || teamBusy) return null;
+    setTeamBusy(true);
+    try {
+      const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, sessionId }) });
+      const payload = await response.json() as ContextPayload;
+      if (!response.ok) throw new Error(payload.error || "팀 공유 설정을 저장하지 못했어요.");
+      applyContextPayload(payload);
+      return payload;
+    } catch (error) {
+      setTeamMessage(error instanceof Error ? error.message : "팀 공유 설정을 저장하지 못했어요.");
+      return null;
+    } finally {
+      setTeamBusy(false);
+    }
+  }
+
+  async function submitTeamShare(event: FormEvent) {
+    event.preventDefault();
+    if (!teamForm.email.trim()) return;
+    const action = sessionRole === "owner" ? "share" : "handoff";
+    const payload = await runTeamAction({ action, email: teamForm.email, role: teamForm.role, note: teamForm.note });
+    if (!payload) return;
+    setTeamMessage(sessionRole === "owner"
+      ? (teamForm.note.trim() && teamForm.role === "editor" ? "팀원을 초대하고 작업 인계 메모를 남겼어요." : "팀원의 공유 권한을 저장했어요.")
+      : "팀원에게 작업을 넘겼어요.");
+    setTeamForm({ email: "", role: "editor", note: "" });
+  }
+
+  async function revokeTeamMember(email: string) {
+    const payload = await runTeamAction({ action: "revoke", email });
+    if (payload) setTeamMessage(`${email}의 공유 권한을 해제했어요.`);
+  }
+
+  async function acceptHandoff(handoffId: string) {
+    const payload = await runTeamAction({ action: "accept", handoffId });
+    if (payload) {
+      setTeamMessage("작업을 이어받았어요. 같은 기록에서 바로 계속할 수 있습니다.");
+      setTeamOpen(false);
     }
   }
 
@@ -523,6 +590,9 @@ export default function Home() {
     return mcpConnections.filter((item) => (mcpCategory === "전체" || item.category === mcpCategory) && (!query || `${item.name} ${item.note} ${item.category}`.toLowerCase().includes(query)));
   }, [mcpCategory, mcpConnections, mcpQuery]);
   const setupConnection = mcpConnections.find((item) => item.id === mcpSetupId) ?? null;
+  const canEditSession = sessionRole !== "viewer";
+  const pendingTeamHandoff = teamHandoffs.find((handoff) => handoff.status === "pending" && handoff.toEmail === currentUser) ?? null;
+  const handoffTargets = teamMembers.filter((member) => member.email !== currentUser && (member.role === "owner" || member.role === "editor"));
 
   function assistantGuidance(payload: AssistantPayload) {
     if (payload.code === "HIGGSFIELD_MCP_AUTH_REQUIRED") return "이미지·영상 생성 MCP를 연결하면 창작 요청도 자동 실행할 수 있어요.";
@@ -538,7 +608,7 @@ export default function Home() {
       setSessionTitle(payload.context.title);
       setLastContextProvider(payload.context.lastProvider);
       setRecentSessions((items) => [
-        { id: payload.context!.sessionId, title: payload.context!.title, lastProvider: payload.context!.lastProvider },
+        { ...items.find((item) => item.id === payload.context!.sessionId), id: payload.context!.sessionId, title: payload.context!.title, lastProvider: payload.context!.lastProvider },
         ...items.filter((item) => item.id !== payload.context!.sessionId),
       ].slice(0, 8));
     }
@@ -570,7 +640,7 @@ export default function Home() {
   async function submitTask(event: FormEvent) {
     event.preventDefault();
     const task = prompt.trim();
-    if (!task || isWorking) return;
+    if (!task || isWorking || !canEditSession) return;
     const team = selectedTeam;
     setMessages((items) => [...items, { role: "user", text: task }]);
     setPrompt("");
@@ -591,7 +661,7 @@ export default function Home() {
   }
 
   async function resolveToolApproval(approval: ApprovalRequest, decision: "approve" | "reject") {
-    if (isWorking || approval.status === "approved" || approval.status === "rejected") return;
+    if (isWorking || !canEditSession || approval.status === "approved" || approval.status === "rejected") return;
     setIsWorking(true);
     setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "running" } } : message));
     try {
@@ -741,9 +811,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "new" }) });
       if (!response.ok) throw new Error("new context unavailable");
-      const payload = await response.json() as { session: ContextSession };
-      setSessionId(payload.session.id);
-      setRecentSessions((items) => [payload.session, ...items.filter((item) => item.id !== payload.session.id)].slice(0, 8));
+      applyContextPayload(await response.json() as ContextPayload);
     } catch {
       setSessionId(`new-${Date.now()}`);
     }
@@ -772,7 +840,7 @@ export default function Home() {
         <div className="recents">
           <p>최근 작업</p>
           {recentSessions.length ? recentSessions.map((session) => (
-            <button className={session.id === sessionId ? "active" : ""} key={session.id} onClick={() => void loadWorkContext(session.id)}>{session.title}</button>
+            <button className={session.id === sessionId ? "active" : ""} key={session.id} onClick={() => void loadWorkContext(session.id)}>{session.title}{session.role && session.role !== "owner" ? " · 공유됨" : ""}</button>
           )) : <small>{contextLoading ? "기억을 불러오는 중…" : "아직 저장된 작업이 없어요."}</small>}
         </div>
 
@@ -812,6 +880,7 @@ export default function Home() {
                 <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
                   {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
                   <div>
+                    {message.role === "user" && message.author && message.author !== currentUser && <small className="team-author">{message.author}</small>}
                     <p>{message.text}</p>
                     {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={`${step.status} ${step.type}`} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
                     {message.approval && (
@@ -825,8 +894,8 @@ export default function Home() {
                         ))}
                         <p>승인하면 위 내용 그대로 실행하며, 인자 변경은 허용하지 않아요.</p>
                         <div className="tool-approval-actions">
-                          <button type="button" className="approve" disabled={isWorking || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
-                          <button type="button" disabled={isWorking || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
+                          <button type="button" className="approve" disabled={isWorking || !canEditSession || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
+                          <button type="button" disabled={isWorking || !canEditSession || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
                         </div>
                       </section>
                     )}
@@ -848,11 +917,18 @@ export default function Home() {
           <div className="context-bridge" aria-label="모델 공용 작업 기억">
             <div className="context-bridge-copy">
               <i />
-              <span><b>{sessionTitle}</b><small>{lastContextProvider ? `${lastContextProvider === "openai" ? "GPT" : lastContextProvider === "anthropic" ? "Claude" : "Perplexity"}에서 이어갈 준비됨` : "GPT와 Claude가 같은 작업 기록을 사용해요"}</small></span>
+              <span><b>{sessionTitle}</b><small>{pendingTeamHandoff
+                ? `${pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요`
+                : teamMembers.length > 1
+                  ? `팀 작업 · ${teamMembers.length}명 · ${sessionRole === "viewer" ? "보기 전용" : "편집 가능"}`
+                  : lastContextProvider
+                    ? `${lastContextProvider === "openai" ? "GPT" : lastContextProvider === "anthropic" ? "Claude" : "Perplexity"}에서 이어갈 준비됨`
+                    : "GPT와 Claude가 같은 작업 기록을 사용해요"}</small></span>
             </div>
             <div className="context-bridge-actions">
-              <button type="button" className={modelPreference === "gpt" ? "active" : ""} onClick={() => setModelPreference("gpt")}>GPT로 이어하기</button>
-              <button type="button" className={modelPreference === "claude" ? "active" : ""} onClick={() => setModelPreference("claude")}>Claude로 이어하기</button>
+              <button type="button" disabled={!canEditSession} className={modelPreference === "gpt" ? "active" : ""} onClick={() => setModelPreference("gpt")}>GPT로 이어하기</button>
+              <button type="button" disabled={!canEditSession} className={modelPreference === "claude" ? "active" : ""} onClick={() => setModelPreference("claude")}>Claude로 이어하기</button>
+              <button type="button" className={pendingTeamHandoff ? "attention" : ""} onClick={() => setTeamOpen(true)}>팀 공유{teamMembers.length > 1 ? ` ${teamMembers.length}` : ""}</button>
               <button type="button" onClick={() => void newChat()}>새 작업</button>
             </div>
           </div>
@@ -861,8 +937,9 @@ export default function Home() {
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handleComposerKey}
-              placeholder="테라코타에게 무엇이든 물어보세요"
+              placeholder={canEditSession ? "테라코타에게 무엇이든 물어보세요" : "보기 전용 작업입니다"}
               aria-label="테라코타에게 보낼 메시지"
+              disabled={!canEditSession}
               rows={1}
             />
             <div className="composer-actions">
@@ -871,7 +948,7 @@ export default function Home() {
                 <button type="button" aria-label="웹 검색">◎</button>
               </div>
               <span>{selectedTeam}</span>
-              <button className="send-button" disabled={!prompt.trim() || isWorking} aria-label="메시지 보내기">↑</button>
+              <button className="send-button" disabled={!prompt.trim() || isWorking || !canEditSession} aria-label="메시지 보내기">↑</button>
             </div>
           </form>
           <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
@@ -901,6 +978,66 @@ export default function Home() {
           <button onClick={() => setGardenOpen(true)}>가꾸기</button>
         </div>
       </aside>
+
+      {teamOpen && (
+        <div className="overlay" role="presentation" onMouseDown={() => setTeamOpen(false)}>
+          <section className="dialog team-dialog" role="dialog" aria-modal="true" aria-label="팀 작업 공유" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="dialog-close" onClick={() => setTeamOpen(false)} aria-label="닫기">×</button>
+            <header><p>Team handoff</p><h2>같은 작업을 함께 키우기</h2><span>팀원도 같은 GPT·Claude 기록과 도구 결과에서 바로 이어갈 수 있어요.</span></header>
+
+            {pendingTeamHandoff && (
+              <section className="incoming-handoff">
+                <div><b>{pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요</b><p>{pendingTeamHandoff.note}</p></div>
+                <button type="button" disabled={teamBusy} onClick={() => void acceptHandoff(pendingTeamHandoff.id)}>이어받기</button>
+              </section>
+            )}
+
+            <div className="team-access-note"><span>✓</span><p>초대한 이메일로 로그인한 팀원만 이 작업을 볼 수 있습니다. 현재 소유자 전용 사이트에서는 해당 팀원에게 사이트 접근 권한도 추가해야 해요.</p></div>
+
+            <section className="team-member-section">
+              <div className="team-section-head"><div><h3>함께 보는 사람</h3><p>{sessionOwner} 소유 · 현재 내 권한 {sessionRole === "owner" ? "소유자" : sessionRole === "editor" ? "편집" : "보기"}</p></div><b>{teamMembers.length}명</b></div>
+              <div className="team-member-list">
+                {teamMembers.map((member) => (
+                  <article key={member.email}>
+                    <span>{member.email.slice(0, 1).toUpperCase()}</span>
+                    <div><b>{member.email}</b><small>{member.role === "owner" ? "소유자" : member.role === "editor" ? "편집 가능" : "보기 전용"}</small></div>
+                    {sessionRole === "owner" && member.role !== "owner"
+                      ? <button type="button" disabled={teamBusy} onClick={() => void revokeTeamMember(member.email)}>해제</button>
+                      : member.email !== currentUser && member.role !== "viewer" && canEditSession
+                        ? <button type="button" onClick={() => setTeamForm((value) => ({ ...value, email: member.email, role: "editor" }))}>넘기기</button>
+                        : null}
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            {sessionRole !== "viewer" && (
+              <form className="team-share-form" onSubmit={submitTeamShare}>
+                <div className="team-section-head"><div><h3>{sessionRole === "owner" ? "팀원 초대 또는 인계" : "팀원에게 인계"}</h3><p>{sessionRole === "owner" ? "보기·편집 권한을 정하고, 선택적으로 인계 메모를 남기세요." : "편집 가능한 기존 팀원에게 현재 상태를 넘깁니다."}</p></div></div>
+                {sessionRole === "owner" ? (
+                  <div className="team-form-row">
+                    <label><span>팀원 이메일</span><input type="email" required value={teamForm.email} onChange={(event) => setTeamForm((value) => ({ ...value, email: event.target.value }))} placeholder="teammate@company.com" /></label>
+                    <label><span>권한</span><select value={teamForm.role} onChange={(event) => setTeamForm((value) => ({ ...value, role: event.target.value as "editor" | "viewer" }))}><option value="editor">편집 가능</option><option value="viewer">보기 전용</option></select></label>
+                  </div>
+                ) : (
+                  <label><span>넘겨받을 팀원</span><select required value={teamForm.email} onChange={(event) => setTeamForm((value) => ({ ...value, email: event.target.value }))}><option value="">팀원 선택</option>{handoffTargets.map((member) => <option value={member.email} key={member.email}>{member.email}</option>)}</select></label>
+                )}
+                <label><span>인계 메모 {sessionRole === "owner" ? "(선택)" : ""}</span><textarea value={teamForm.note} disabled={sessionRole === "owner" && teamForm.role === "viewer"} required={sessionRole !== "owner"} onChange={(event) => setTeamForm((value) => ({ ...value, note: event.target.value }))} placeholder={teamForm.role === "viewer" ? "보기 전용 팀원에게는 인계하지 않아요." : "지금까지 한 일과 다음에 할 일을 짧게 적어주세요."} rows={3} /></label>
+                <div className="team-form-actions"><p>{teamMessage}</p><button disabled={teamBusy || !teamForm.email.trim()}>{teamBusy ? "저장 중" : sessionRole === "owner" ? (teamForm.note.trim() && teamForm.role === "editor" ? "초대하고 넘기기" : "공유 저장") : "작업 넘기기"}</button></div>
+              </form>
+            )}
+
+            {sessionRole === "viewer" && <p className="viewer-note">보기 전용 팀원은 작업 기록을 확인할 수 있지만 모델 실행, 도구 승인, 다른 팀원 초대는 할 수 없어요.</p>}
+
+            {teamHandoffs.length > 0 && (
+              <section className="handoff-history">
+                <h3>최근 인계</h3>
+                {teamHandoffs.slice(0, 4).map((handoff) => <p key={handoff.id}><span>{handoff.fromEmail} → {handoff.toEmail}</span><b>{handoff.status === "accepted" ? "이어받음" : "대기 중"}</b></p>)}
+              </section>
+            )}
+          </section>
+        </div>
+      )}
 
       {gardenOpen && (
         <div className="overlay" role="presentation" onMouseDown={() => setGardenOpen(false)}>
