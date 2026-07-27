@@ -1,0 +1,74 @@
+name: terracotta-production
+
+services:
+  terracotta:
+    image: ghcr.io/hyunaeee/terracotta:${TERRACOTTA_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+      HIGGSFIELD_MCP_CONNECTED: ${HIGGSFIELD_MCP_CONNECTED:-false}
+      TERRACOTTA_MONTHLY_BUDGET_USD: ${TERRACOTTA_MONTHLY_BUDGET_USD:-24}
+      TERRACOTTA_TRUST_AUTH_HEADERS: "true"
+      MCP_TOKEN_ENCRYPTION_KEY: ${MCP_TOKEN_ENCRYPTION_KEY:-}
+      TERRACOTTA_SELF_HOSTED: "true"
+    volumes:
+      - terracotta-data:/data
+    networks:
+      - private
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.11.0
+    restart: unless-stopped
+    environment:
+      OAUTH2_PROXY_PROVIDER: github
+      OAUTH2_PROXY_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?Set GITHUB_OAUTH_CLIENT_ID}
+      OAUTH2_PROXY_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?Set GITHUB_OAUTH_CLIENT_SECRET}
+      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:?Set OAUTH2_PROXY_COOKIE_SECRET}
+      OAUTH2_PROXY_COOKIE_SECURE: "true"
+      OAUTH2_PROXY_COOKIE_SAMESITE: lax
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      OAUTH2_PROXY_GITHUB_USERS: ${TERRACOTTA_GITHUB_USERS:?Set TERRACOTTA_GITHUB_USERS}
+      OAUTH2_PROXY_SCOPE: "user:email"
+      OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:4180"
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_PASS_USER_HEADERS: "true"
+      OAUTH2_PROXY_UPSTREAMS: "static://202"
+      OAUTH2_PROXY_REDIRECT_URL: https://${TERRACOTTA_DOMAIN:?Set TERRACOTTA_DOMAIN}/oauth2/callback
+    networks:
+      - private
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - terracotta
+      - oauth2-proxy
+    environment:
+      TERRACOTTA_DOMAIN: ${TERRACOTTA_DOMAIN:?Set TERRACOTTA_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - private
+
+volumes:
+  terracotta-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  private:
+    driver: bridge

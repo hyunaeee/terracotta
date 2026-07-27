@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://orbit-ai-companion.likecorp817.chatgpt.site">Live prototype</a>
+  <a href="./DEPLOYMENT.md">Production deployment</a>
   ·
   <a href="./SELF_HOSTING.md">Self-host with Docker</a>
   ·
@@ -29,6 +29,8 @@ Terracotta는 GPT, Claude, Perplexity, Higgsfield처럼 서로 다른 강점을 
 ## 현재 구현된 것
 
 - **멀티 모델 라우터** — OpenAI, Anthropic, Perplexity, Higgsfield 연결 상태와 사용량 예산을 한곳에서 관리합니다.
+- **GPT ↔ Claude 공용 작업 기억** — 대화·최종 결과·검증된 도구 기록을 Terracotta 소유의 D1 세션에 저장해 모델을 바꿔도 같은 작업을 이어갑니다.
+- **팀 작업 공유와 인계** — 작업별로 팀원을 이메일로 초대해 보기·편집 권한을 나누고, 인계 메모와 함께 같은 AI 작업 기록을 넘겨받습니다.
 - **자동 오케스트레이터** — 질문을 분석해 모델과 연결된 MCP 도구를 선택하고, 읽기 도구는 자동 실행한 뒤 결과를 다시 모델이 검증·정리합니다.
 - **안전한 실행 승인** — 메시지 전송·수정·삭제처럼 외부 상태를 바꾸는 작업은 서비스·도구·인자를 보여준 뒤 사용자 승인으로만 실행합니다.
 - **자동 모델 레지스트리** — 연결된 공급사의 모델 목록을 주기적으로 확인하고 최신 우선순위를 갱신합니다.
@@ -41,12 +43,16 @@ Terracotta는 GPT, Claude, Perplexity, Higgsfield처럼 서로 다른 강점을 
 - **보안 중심 MCP OAuth** — PKCE S256, AES-GCM 토큰 암호화, HTTPS 전용 연결과 내부 네트워크 주소 차단을 적용합니다.
 - **구독 프로토타입** — 모델·검색·이미지·영상 사용량을 함께 고려한 크레딧 플랜과 월간 공급사 비용 가드를 제공합니다.
 - **한 명령 셀프호스팅** — Docker Compose로 웹 버전과 같은 Worker 앱을 실행하고 D1·MCP 암호화 키를 전용 볼륨에 보존합니다.
+- **Windows·macOS·Linux 로컬 에이전트** — 배포 사이트와 각 컴퓨터를 아웃바운드로 연결하고, 승인한 명령만 PowerShell·zsh·bash에서 작업 폴더 안에 실행합니다.
+- **독립 운영 배포** — Docker, Caddy 자동 HTTPS, GitHub 팀 로그인과 영구 볼륨을 묶어 `chatgpt.site` 없이 자체 도메인으로 운영합니다.
 
 ## 제품 흐름
 
 ```mermaid
 flowchart LR
-  U["사용자 요청"] --> R["Terracotta Router"]
+  T["팀원 · 역할별 접근"] --> M["Terracotta 공용 작업 기억"]
+  U["사용자 요청"] --> M
+  M --> R["Terracotta Router"]
   R --> O["OpenAI"]
   R --> A["Anthropic"]
   R --> P["Perplexity"]
@@ -55,6 +61,7 @@ flowchart LR
   A --> C
   P --> C
   H --> C
+  C --> M
   C --> S["Sparks · 가든 성장"]
 ```
 
@@ -65,7 +72,9 @@ flowchart LR
 1. **라우팅** — 과제 분류(general/research/creative) 후 선호 설정과 최신 모델 랭킹으로 플래너 선택. 리서치성 요청은 Perplexity로 위임
 2. **도구 루프** — 연결된 MCP 도구를 플래너가 호출. 쓰기(write) 위험 도구는 즉시 실행하지 않고 **승인 대기**로 전환(만료 시간 포함), 요청당 도구 호출 상한 적용
 3. **교차 검토** — "교차 검증", "second opinion" 류 요청이면 **다른 공급사의 백업 모델**이 초안의 사실 오류·누락을 검토해 최종본 작성 (`reviewedBy`로 표기)
-4. **기록** — 모든 단계가 orchestration trace(route/tool/review)로 남고, 비용은 사용량 원장에 적립되어 월 예산 가드와 연동
+4. **컨텍스트 인계** — 모델이 바뀌면 사용자에게 보인 대화·최종 출력·검증된 도구 요약만 공용 세션에서 넘기며, 비공개 추론 과정은 전달하지 않음
+5. **팀 인계** — 소유자는 이메일별 보기·편집 권한을 관리하고, 편집 가능한 팀원끼리 인계 메모와 현재 작업 기록을 주고받음
+6. **기록** — 모든 단계가 orchestration trace(route/tool/review/handoff)로 남고, 비용은 사용량 원장에 적립되어 월 예산 가드와 연동
 
 > 같은 원칙(다중 에이전트 협업 + 검증 + 평가)을 최소 형태로 정리한 레퍼런스: [agent-orchestra](https://github.com/hyunaeee/agent-orchestra)
 
@@ -99,7 +108,8 @@ node bench/routing-bench.mjs
 - Cloudflare D1 + Drizzle ORM
 - 공급사별 모델 레지스트리 및 사용량 원장
 - Streamable HTTP MCP + OAuth 2.0/PKCE
-- OpenAI Sites 배포 설정
+- Docker + GitHub Container Registry
+- Caddy 자동 HTTPS + GitHub OAuth 팀 로그인
 
 ## 로컬에서 실행하기
 
@@ -115,6 +125,8 @@ docker compose up -d --build
 브라우저에서 [http://localhost:3000](http://localhost:3000)을 열면 됩니다. Windows PowerShell에서는 `cp` 대신 `Copy-Item`을 사용하세요. 데이터는 `terracotta-data` 볼륨에 유지되고 MCP 토큰 암호화 키는 최초 실행 때 자동 생성됩니다.
 
 업데이트, 백업, 외부 공개 전 보안 설정은 [셀프호스팅 가이드](./SELF_HOSTING.md)에 정리되어 있습니다.
+
+자체 도메인과 GitHub 팀 로그인을 붙이는 운영 배포는 [독립 배포 가이드](./DEPLOYMENT.md)를 따르세요.
 
 ### 개발 서버로 실행
 
@@ -145,6 +157,7 @@ npm run dev
 | `HIGGSFIELD_MCP_CONNECTED` | Higgsfield MCP 인증 상태 |
 | `TERRACOTTA_MONTHLY_BUDGET_USD` | 월간 공급사 비용 한도 |
 | `MCP_TOKEN_ENCRYPTION_KEY` | MCP OAuth 토큰 암호화용 32바이트 base64 키 |
+| `TERRACOTTA_TRUST_AUTH_HEADERS` | 신뢰 가능한 로그인 프록시가 있을 때만 셀프호스트 팀 이메일 식별 활성화 |
 
 암호화 키 예시:
 
@@ -164,6 +177,7 @@ API 키는 서버 환경변수로만 설정하고 `NEXT_PUBLIC_` 접두사를 �
 | `npm run lint` | 코드 정적 검사 |
 | `npm run db:generate` | Drizzle 마이그레이션 생성 |
 | `docker compose up -d --build` | 셀프호스트 앱 빌드 및 백그라운드 실행 |
+| `docker compose --env-file .env.production -f compose.production.yaml up -d --build` | 자체 도메인 운영 배포 |
 
 ## 프로젝트 구조
 
@@ -171,6 +185,7 @@ API 키는 서버 환경변수로만 설정하고 `NEXT_PUBLIC_` 접두사를 �
 app/                     UI와 API routes
 lib/terracotta-router.ts 모델 레지스트리·라우팅·비용 기록
 lib/mcp-hub.ts           MCP 연결·OAuth·도구 호출
+lib/work-context.ts      공급사 중립 작업 세션·컨텍스트 인계
 db/                      D1 스키마
 drizzle/                 데이터베이스 마이그레이션
 public/assets/garden/    개별 비트맵 가드닝 아이템

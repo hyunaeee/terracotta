@@ -101,7 +101,7 @@ const treeVarieties = [
   { id: "lavender", name: "라벤더 꽃나무", description: "차분한 보랏빛 꽃으로 자라요", cost: 3400, assets: treeStages.map((_, index) => `/assets/terracotta-lavender-${index}.png`) },
 ] as const;
 
-type OrchestrationStep = { type: "route" | "tool" | "review"; label: string; status: "done" | "approval" | "error" };
+type OrchestrationStep = { type: "route" | "tool" | "review" | "handoff"; label: string; status: "done" | "approval" | "error" };
 type ApprovalRequest = {
   id: string;
   summary: string;
@@ -109,7 +109,20 @@ type ApprovalRequest = {
   actions: Array<{ service: string; tool: string; arguments: Record<string, unknown> }>;
   status?: "pending" | "running" | "approved" | "rejected";
 };
-type Message = { role: "user" | "assistant"; text: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest };
+type SessionRole = "owner" | "editor" | "viewer";
+type Message = { role: "user" | "assistant"; text: string; author?: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest };
+type ContextSession = { id: string; title: string; lastProvider: string | null; ownerEmail?: string; role?: SessionRole };
+type TeamMember = { email: string; role: SessionRole; invitedBy: string | null; createdAt: string };
+type TeamHandoff = { id: string; fromEmail: string; toEmail: string; note: string; status: "pending" | "accepted"; createdAt: string };
+type ContextPayload = {
+  currentUser: string;
+  session: ContextSession | null;
+  messages: Message[];
+  members: TeamMember[];
+  handoffs: TeamHandoff[];
+  recentSessions: ContextSession[];
+  error?: string;
+};
 type AssistantPayload = {
   text?: string;
   model?: string;
@@ -120,6 +133,7 @@ type AssistantPayload = {
   approvalRequired?: boolean;
   approval?: ApprovalRequest;
   orchestration?: { runId: string; trace: OrchestrationStep[]; reviewedBy?: string };
+  context?: { sessionId: string; title: string; lastProvider: string; handoff?: { from: string; to: string; label: string } };
 };
 type GardenPosition = { x: number; y: number };
 type GroundTile = { cell: number; grassId: string };
@@ -150,6 +164,34 @@ type McpConnection = {
   has_credentials: boolean;
   last_checked_at: string | null;
   error: string | null;
+};
+type LocalAgent = {
+  id: string;
+  name: string;
+  platform: string | null;
+  shell: string | null;
+  workspace: string | null;
+  online: boolean;
+  lastSeenAt: string | null;
+  createdAt: string;
+};
+type LocalAgentJob = {
+  id: string;
+  agentId: string;
+  command: string;
+  cwd: string;
+  status: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+type LocalAgentDashboard = {
+  agents: LocalAgent[];
+  jobs: LocalAgentJob[];
+  connected: boolean;
+  error?: string;
 };
 
 const mcpTemplates = [
@@ -211,6 +253,20 @@ function McpBrandMark({ id, name }: { id: string; name: string }) {
 export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionTitle, setSessionTitle] = useState("새 작업");
+  const [lastContextProvider, setLastContextProvider] = useState<string | null>(null);
+  const [recentSessions, setRecentSessions] = useState<ContextSession[]>([]);
+  const [contextLoading, setContextLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState("owner");
+  const [sessionRole, setSessionRole] = useState<SessionRole>("owner");
+  const [sessionOwner, setSessionOwner] = useState("owner");
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamHandoffs, setTeamHandoffs] = useState<TeamHandoff[]>([]);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [teamBusy, setTeamBusy] = useState(false);
+  const [teamMessage, setTeamMessage] = useState("팀원을 초대하거나 편집 가능한 팀원에게 작업을 넘길 수 있어요.");
+  const [teamForm, setTeamForm] = useState<{ email: string; role: "editor" | "viewer"; note: string }>({ email: "", role: "editor", note: "" });
   const [isWorking, setIsWorking] = useState(false);
   const [sparks, setSparks] = useState(100000);
   const [growth, setGrowth] = useState(0);
@@ -238,6 +294,14 @@ export default function Home() {
   const [mcpCategory, setMcpCategory] = useState("전체");
   const [mcpSetupId, setMcpSetupId] = useState<string | null>(null);
   const [mcpCredentials, setMcpCredentials] = useState({ clientId: "", clientSecret: "" });
+  const [localAgentOpen, setLocalAgentOpen] = useState(false);
+  const [localAgents, setLocalAgents] = useState<LocalAgent[]>([]);
+  const [localAgentJobs, setLocalAgentJobs] = useState<LocalAgentJob[]>([]);
+  const [localAgentBusy, setLocalAgentBusy] = useState(false);
+  const [localAgentName, setLocalAgentName] = useState("내 컴퓨터");
+  const [localAgentToken, setLocalAgentToken] = useState<string | null>(null);
+  const [localAgentPlatform, setLocalAgentPlatform] = useState<"windows" | "mac">("windows");
+  const [localAgentNote, setLocalAgentNote] = useState("연결 후 채팅에서 파일 수정·빌드·테스트를 요청할 수 있어요.");
   const [modelPreference, setModelPreference] = useState<ModelPreference>("latest");
   const [registryStatus, setRegistryStatus] = useState<RegistryStatus | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
@@ -336,7 +400,78 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     void loadRegistry();
+    void loadWorkContext();
   }, [ready]);
+
+  function applyContextPayload(payload: ContextPayload, replaceMessages = true) {
+    setCurrentUser(payload.currentUser || "owner");
+    setSessionId(payload.session?.id ?? null);
+    setSessionTitle(payload.session?.title ?? "새 작업");
+    setSessionOwner(payload.session?.ownerEmail ?? payload.currentUser ?? "owner");
+    setSessionRole(payload.session?.role ?? "owner");
+    setLastContextProvider(payload.session?.lastProvider ?? null);
+    if (replaceMessages) setMessages(payload.messages ?? []);
+    setTeamMembers(payload.members ?? []);
+    setTeamHandoffs(payload.handoffs ?? []);
+    setRecentSessions(payload.recentSessions ?? []);
+  }
+
+  async function loadWorkContext(targetSessionId?: string) {
+    setContextLoading(true);
+    try {
+      const query = targetSessionId ? `?sessionId=${encodeURIComponent(targetSessionId)}` : "";
+      const response = await fetch(`/api/context${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("context unavailable");
+      applyContextPayload(await response.json() as ContextPayload);
+      setMobileMenu(false);
+    } catch {
+      setSessionId(null);
+    } finally {
+      setContextLoading(false);
+    }
+  }
+
+  async function runTeamAction(body: Record<string, unknown>) {
+    if (!sessionId || teamBusy) return null;
+    setTeamBusy(true);
+    try {
+      const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, sessionId }) });
+      const payload = await response.json() as ContextPayload;
+      if (!response.ok) throw new Error(payload.error || "팀 공유 설정을 저장하지 못했어요.");
+      applyContextPayload(payload);
+      return payload;
+    } catch (error) {
+      setTeamMessage(error instanceof Error ? error.message : "팀 공유 설정을 저장하지 못했어요.");
+      return null;
+    } finally {
+      setTeamBusy(false);
+    }
+  }
+
+  async function submitTeamShare(event: FormEvent) {
+    event.preventDefault();
+    if (!teamForm.email.trim()) return;
+    const action = sessionRole === "owner" ? "share" : "handoff";
+    const payload = await runTeamAction({ action, email: teamForm.email, role: teamForm.role, note: teamForm.note });
+    if (!payload) return;
+    setTeamMessage(sessionRole === "owner"
+      ? (teamForm.note.trim() && teamForm.role === "editor" ? "팀원을 초대하고 작업 인계 메모를 남겼어요." : "팀원의 공유 권한을 저장했어요.")
+      : "팀원에게 작업을 넘겼어요.");
+    setTeamForm({ email: "", role: "editor", note: "" });
+  }
+
+  async function revokeTeamMember(email: string) {
+    const payload = await runTeamAction({ action: "revoke", email });
+    if (payload) setTeamMessage(`${email}의 공유 권한을 해제했어요.`);
+  }
+
+  async function acceptHandoff(handoffId: string) {
+    const payload = await runTeamAction({ action: "accept", handoffId });
+    if (payload) {
+      setTeamMessage("작업을 이어받았어요. 같은 기록에서 바로 계속할 수 있습니다.");
+      setTeamOpen(false);
+    }
+  }
 
   async function loadRegistry(refresh = false) {
     setRegistryLoading(true);
@@ -376,6 +511,68 @@ export default function Home() {
       setMcpNote(error instanceof Error ? error.message : "MCP 연결을 불러오지 못했어요.");
     } finally {
       setMcpLoading(false);
+    }
+  }
+
+  async function loadLocalAgents() {
+    setLocalAgentBusy(true);
+    try {
+      const response = await fetch("/api/local-agent", { cache: "no-store" });
+      const payload = await response.json() as LocalAgentDashboard;
+      if (!response.ok) throw new Error(payload.error || "로컬 연결을 불러오지 못했어요.");
+      setLocalAgents(payload.agents ?? []);
+      setLocalAgentJobs(payload.jobs ?? []);
+      if (payload.connected) setLocalAgentNote("로컬 터미널이 온라인입니다. 채팅에서 필요한 작업을 요청하세요.");
+    } catch (error) {
+      setLocalAgentNote(error instanceof Error ? error.message : "로컬 연결을 불러오지 못했어요.");
+    } finally {
+      setLocalAgentBusy(false);
+    }
+  }
+
+  function openLocalAgent() {
+    setLocalAgentOpen(true);
+    setMobileMenu(false);
+    void loadLocalAgents();
+  }
+
+  async function pairLocalAgent() {
+    if (localAgentBusy) return;
+    setLocalAgentBusy(true);
+    try {
+      const response = await fetch("/api/local-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "pair", name: localAgentName }),
+      });
+      const payload = await response.json() as { token?: string; error?: string };
+      if (!response.ok || !payload.token) throw new Error(payload.error || "연결 키를 만들지 못했어요.");
+      setLocalAgentToken(payload.token);
+      setLocalAgentNote("한 번만 표시되는 연결 키를 만들었어요. 아래 명령을 연결할 컴퓨터에서 실행하세요.");
+      await loadLocalAgents();
+    } catch (error) {
+      setLocalAgentNote(error instanceof Error ? error.message : "연결 키를 만들지 못했어요.");
+    } finally {
+      setLocalAgentBusy(false);
+    }
+  }
+
+  async function revokeLocalAgent(id: string) {
+    setLocalAgentBusy(true);
+    try {
+      const response = await fetch("/api/local-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "revoke", id }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "연결을 해제하지 못했어요.");
+      setLocalAgentNote("해당 컴퓨터의 연결 키와 대기 작업을 해제했어요.");
+      await loadLocalAgents();
+    } catch (error) {
+      setLocalAgentNote(error instanceof Error ? error.message : "연결을 해제하지 못했어요.");
+    } finally {
+      setLocalAgentBusy(false);
     }
   }
 
@@ -485,12 +682,21 @@ export default function Home() {
   const gardenCategories = useMemo(() => ["전체", ...Array.from(new Set(gardenShop.map((item) => item.category)))], []);
   const visibleGardenItems = useMemo(() => gardenShop.filter((item) => shopCategory === "전체" || item.category === shopCategory), [shopCategory]);
   const visibleModelInsights = useMemo(() => (modelInsights?.models ?? []).filter((model) => modelInsightFilter === "전체" || model.categories.includes(modelInsightFilter)), [modelInsightFilter, modelInsights]);
+  const localAgentOrigin = ready && typeof window !== "undefined" ? window.location.origin : "https://your-terracotta.example";
+  const localAgentCommand = localAgentToken
+    ? localAgentPlatform === "windows"
+      ? `Invoke-WebRequest "${localAgentOrigin}/terracotta-local-agent.mjs" -OutFile ".\\terracotta-local-agent.mjs"\nnode .\\terracotta-local-agent.mjs --server "${localAgentOrigin}" --token "${localAgentToken}" --workspace .`
+      : `curl -fsSL "${localAgentOrigin}/terracotta-local-agent.mjs" -o terracotta-local-agent.mjs\nnode ./terracotta-local-agent.mjs --server "${localAgentOrigin}" --token "${localAgentToken}" --workspace .`
+    : "";
   const mcpCategories = useMemo(() => ["전체", ...Array.from(new Set(mcpConnections.map((item) => item.category)))], [mcpConnections]);
   const visibleMcpConnections = useMemo(() => {
     const query = mcpQuery.trim().toLowerCase();
     return mcpConnections.filter((item) => (mcpCategory === "전체" || item.category === mcpCategory) && (!query || `${item.name} ${item.note} ${item.category}`.toLowerCase().includes(query)));
   }, [mcpCategory, mcpConnections, mcpQuery]);
   const setupConnection = mcpConnections.find((item) => item.id === mcpSetupId) ?? null;
+  const canEditSession = sessionRole !== "viewer";
+  const pendingTeamHandoff = teamHandoffs.find((handoff) => handoff.status === "pending" && handoff.toEmail === currentUser) ?? null;
+  const handoffTargets = teamMembers.filter((member) => member.email !== currentUser && (member.role === "owner" || member.role === "editor"));
 
   function assistantGuidance(payload: AssistantPayload) {
     if (payload.code === "HIGGSFIELD_MCP_AUTH_REQUIRED") return "이미지·영상 생성 MCP를 연결하면 창작 요청도 자동 실행할 수 있어요.";
@@ -501,6 +707,15 @@ export default function Home() {
 
   function addAssistantResult(payload: AssistantPayload, fallbackModel: string) {
     const trace = payload.orchestration?.trace ?? [];
+    if (payload.context) {
+      setSessionId(payload.context.sessionId);
+      setSessionTitle(payload.context.title);
+      setLastContextProvider(payload.context.lastProvider);
+      setRecentSessions((items) => [
+        { ...items.find((item) => item.id === payload.context!.sessionId), id: payload.context!.sessionId, title: payload.context!.title, lastProvider: payload.context!.lastProvider },
+        ...items.filter((item) => item.id !== payload.context!.sessionId),
+      ].slice(0, 8));
+    }
     if (payload.approvalRequired && payload.approval) {
       setMessages((items) => [...items, {
         role: "assistant",
@@ -529,13 +744,13 @@ export default function Home() {
   async function submitTask(event: FormEvent) {
     event.preventDefault();
     const task = prompt.trim();
-    if (!task || isWorking) return;
+    if (!task || isWorking || !canEditSession) return;
     const team = selectedTeam;
     setMessages((items) => [...items, { role: "user", text: task }]);
     setPrompt("");
     setIsWorking(true);
     try {
-      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference }) });
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference, sessionId }) });
       const payload = await response.json() as AssistantPayload;
       if (!response.ok) {
         setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "연결 설정 필요" }]);
@@ -550,7 +765,7 @@ export default function Home() {
   }
 
   async function resolveToolApproval(approval: ApprovalRequest, decision: "approve" | "reject") {
-    if (isWorking || approval.status === "approved" || approval.status === "rejected") return;
+    if (isWorking || !canEditSession || approval.status === "approved" || approval.status === "rejected") return;
     setIsWorking(true);
     setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "running" } } : message));
     try {
@@ -691,37 +906,47 @@ export default function Home() {
     return { left: `${position.x}%`, top: `${position.y}%`, zIndex: Math.round(2 + position.y / 10) };
   }
 
-  function newChat() {
+  async function newChat() {
     setMessages([]);
     setPrompt("");
     setMobileMenu(false);
+    setSessionTitle("새 작업");
+    setLastContextProvider(null);
+    try {
+      const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "new" }) });
+      if (!response.ok) throw new Error("new context unavailable");
+      applyContextPayload(await response.json() as ContextPayload);
+    } catch {
+      setSessionId(`new-${Date.now()}`);
+    }
   }
 
   return (
     <main className="app-frame">
       <aside className={`sidebar ${mobileMenu ? "open" : ""}`}>
         <div className="sidebar-top">
-          <button className="wordmark" onClick={newChat} aria-label="테라코타 홈">
+          <button className="wordmark" onClick={() => void newChat()} aria-label="테라코타 홈">
             <TerracottaMark /> Terracotta
           </button>
           <button className="sidebar-close" onClick={() => setMobileMenu(false)} aria-label="메뉴 닫기">×</button>
         </div>
 
-        <button className="new-chat" onClick={newChat}><span>＋</span> 새 대화</button>
+        <button className="new-chat" onClick={() => void newChat()}><span>＋</span> 새 작업</button>
 
         <nav className="sidebar-nav" aria-label="주요 메뉴">
           <button className="active" onClick={() => setMobileMenu(false)}><span>○</span> 대화</button>
           <button onClick={() => { setGardenOpen(true); setMobileMenu(false); }}><span>♧</span> 테라코타 가든</button>
           <button onClick={openMcpHub}><span>⌁</span> MCP 연결</button>
+          <button onClick={openLocalAgent}><span>›_</span> 로컬 터미널</button>
           <button onClick={openModelLab}><span>◫</span> 모델 연구소</button>
           <button onClick={() => { setSettingsOpen(true); setMobileMenu(false); }}><span>⌘</span> 모델 및 구독</button>
         </nav>
 
         <div className="recents">
-          <p>최근 대화</p>
-          <button>이번 주 업무 정리</button>
-          <button>신제품 아이디어</button>
-          <button>영상 콘티 초안</button>
+          <p>최근 작업</p>
+          {recentSessions.length ? recentSessions.map((session) => (
+            <button className={session.id === sessionId ? "active" : ""} key={session.id} onClick={() => void loadWorkContext(session.id)}>{session.title}{session.role && session.role !== "owner" ? " · 공유됨" : ""}</button>
+          )) : <small>{contextLoading ? "기억을 불러오는 중…" : "아직 저장된 작업이 없어요."}</small>}
         </div>
 
         <div className="sidebar-account">
@@ -739,7 +964,7 @@ export default function Home() {
           <button className="model-switch" onClick={() => setSettingsOpen(true)}>
             Terracotta Auto · {preferenceLabel} <span>⌄</span>
           </button>
-          <span className="private-state"><i /> 개인 메모리 켜짐</span>
+          <span className="private-state"><i /> GPT ↔ Claude 공용 기억</span>
         </header>
 
         <div className={`conversation ${messages.length ? "has-messages" : ""}`}>
@@ -760,8 +985,9 @@ export default function Home() {
                 <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
                   {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
                   <div>
+                    {message.role === "user" && message.author && message.author !== currentUser && <small className="team-author">{message.author}</small>}
                     <p>{message.text}</p>
-                    {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={step.status} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
+                    {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={`${step.status} ${step.type}`} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
                     {message.approval && (
                       <section className={`tool-approval ${message.approval.status ?? "pending"}`} aria-label="외부 작업 승인">
                         <div className="tool-approval-head"><b>실행 전 확인</b><span>{message.approval.actions.length}개 작업</span></div>
@@ -773,8 +999,8 @@ export default function Home() {
                         ))}
                         <p>승인하면 위 내용 그대로 실행하며, 인자 변경은 허용하지 않아요.</p>
                         <div className="tool-approval-actions">
-                          <button type="button" className="approve" disabled={isWorking || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
-                          <button type="button" disabled={isWorking || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
+                          <button type="button" className="approve" disabled={isWorking || !canEditSession || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
+                          <button type="button" disabled={isWorking || !canEditSession || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
                         </div>
                       </section>
                     )}
@@ -793,13 +1019,32 @@ export default function Home() {
         </div>
 
         <div className="composer-wrap">
+          <div className="context-bridge" aria-label="모델 공용 작업 기억">
+            <div className="context-bridge-copy">
+              <i />
+              <span><b>{sessionTitle}</b><small>{pendingTeamHandoff
+                ? `${pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요`
+                : teamMembers.length > 1
+                  ? `팀 작업 · ${teamMembers.length}명 · ${sessionRole === "viewer" ? "보기 전용" : "편집 가능"}`
+                  : lastContextProvider
+                    ? `${lastContextProvider === "openai" ? "GPT" : lastContextProvider === "anthropic" ? "Claude" : "Perplexity"}에서 이어갈 준비됨`
+                    : "GPT와 Claude가 같은 작업 기록을 사용해요"}</small></span>
+            </div>
+            <div className="context-bridge-actions">
+              <button type="button" disabled={!canEditSession} className={modelPreference === "gpt" ? "active" : ""} onClick={() => setModelPreference("gpt")}>GPT로 이어하기</button>
+              <button type="button" disabled={!canEditSession} className={modelPreference === "claude" ? "active" : ""} onClick={() => setModelPreference("claude")}>Claude로 이어하기</button>
+              <button type="button" className={pendingTeamHandoff ? "attention" : ""} onClick={() => setTeamOpen(true)}>팀 공유{teamMembers.length > 1 ? ` ${teamMembers.length}` : ""}</button>
+              <button type="button" onClick={() => void newChat()}>새 작업</button>
+            </div>
+          </div>
           <form className="composer" onSubmit={submitTask}>
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handleComposerKey}
-              placeholder="테라코타에게 무엇이든 물어보세요"
+              placeholder={canEditSession ? "테라코타에게 무엇이든 물어보세요" : "보기 전용 작업입니다"}
               aria-label="테라코타에게 보낼 메시지"
+              disabled={!canEditSession}
               rows={1}
             />
             <div className="composer-actions">
@@ -808,7 +1053,7 @@ export default function Home() {
                 <button type="button" aria-label="웹 검색">◎</button>
               </div>
               <span>{selectedTeam}</span>
-              <button className="send-button" disabled={!prompt.trim() || isWorking} aria-label="메시지 보내기">↑</button>
+              <button className="send-button" disabled={!prompt.trim() || isWorking || !canEditSession} aria-label="메시지 보내기">↑</button>
             </div>
           </form>
           <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
@@ -838,6 +1083,66 @@ export default function Home() {
           <button onClick={() => setGardenOpen(true)}>가꾸기</button>
         </div>
       </aside>
+
+      {teamOpen && (
+        <div className="overlay" role="presentation" onMouseDown={() => setTeamOpen(false)}>
+          <section className="dialog team-dialog" role="dialog" aria-modal="true" aria-label="팀 작업 공유" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="dialog-close" onClick={() => setTeamOpen(false)} aria-label="닫기">×</button>
+            <header><p>Team handoff</p><h2>같은 작업을 함께 키우기</h2><span>팀원도 같은 GPT·Claude 기록과 도구 결과에서 바로 이어갈 수 있어요.</span></header>
+
+            {pendingTeamHandoff && (
+              <section className="incoming-handoff">
+                <div><b>{pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요</b><p>{pendingTeamHandoff.note}</p></div>
+                <button type="button" disabled={teamBusy} onClick={() => void acceptHandoff(pendingTeamHandoff.id)}>이어받기</button>
+              </section>
+            )}
+
+            <div className="team-access-note"><span>✓</span><p>초대한 이메일로 로그인한 팀원만 이 작업을 볼 수 있습니다. 현재 소유자 전용 사이트에서는 해당 팀원에게 사이트 접근 권한도 추가해야 해요.</p></div>
+
+            <section className="team-member-section">
+              <div className="team-section-head"><div><h3>함께 보는 사람</h3><p>{sessionOwner} 소유 · 현재 내 권한 {sessionRole === "owner" ? "소유자" : sessionRole === "editor" ? "편집" : "보기"}</p></div><b>{teamMembers.length}명</b></div>
+              <div className="team-member-list">
+                {teamMembers.map((member) => (
+                  <article key={member.email}>
+                    <span>{member.email.slice(0, 1).toUpperCase()}</span>
+                    <div><b>{member.email}</b><small>{member.role === "owner" ? "소유자" : member.role === "editor" ? "편집 가능" : "보기 전용"}</small></div>
+                    {sessionRole === "owner" && member.role !== "owner"
+                      ? <button type="button" disabled={teamBusy} onClick={() => void revokeTeamMember(member.email)}>해제</button>
+                      : member.email !== currentUser && member.role !== "viewer" && canEditSession
+                        ? <button type="button" onClick={() => setTeamForm((value) => ({ ...value, email: member.email, role: "editor" }))}>넘기기</button>
+                        : null}
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            {sessionRole !== "viewer" && (
+              <form className="team-share-form" onSubmit={submitTeamShare}>
+                <div className="team-section-head"><div><h3>{sessionRole === "owner" ? "팀원 초대 또는 인계" : "팀원에게 인계"}</h3><p>{sessionRole === "owner" ? "보기·편집 권한을 정하고, 선택적으로 인계 메모를 남기세요." : "편집 가능한 기존 팀원에게 현재 상태를 넘깁니다."}</p></div></div>
+                {sessionRole === "owner" ? (
+                  <div className="team-form-row">
+                    <label><span>팀원 이메일</span><input type="email" required value={teamForm.email} onChange={(event) => setTeamForm((value) => ({ ...value, email: event.target.value }))} placeholder="teammate@company.com" /></label>
+                    <label><span>권한</span><select value={teamForm.role} onChange={(event) => setTeamForm((value) => ({ ...value, role: event.target.value as "editor" | "viewer" }))}><option value="editor">편집 가능</option><option value="viewer">보기 전용</option></select></label>
+                  </div>
+                ) : (
+                  <label><span>넘겨받을 팀원</span><select required value={teamForm.email} onChange={(event) => setTeamForm((value) => ({ ...value, email: event.target.value }))}><option value="">팀원 선택</option>{handoffTargets.map((member) => <option value={member.email} key={member.email}>{member.email}</option>)}</select></label>
+                )}
+                <label><span>인계 메모 {sessionRole === "owner" ? "(선택)" : ""}</span><textarea value={teamForm.note} disabled={sessionRole === "owner" && teamForm.role === "viewer"} required={sessionRole !== "owner"} onChange={(event) => setTeamForm((value) => ({ ...value, note: event.target.value }))} placeholder={teamForm.role === "viewer" ? "보기 전용 팀원에게는 인계하지 않아요." : "지금까지 한 일과 다음에 할 일을 짧게 적어주세요."} rows={3} /></label>
+                <div className="team-form-actions"><p>{teamMessage}</p><button disabled={teamBusy || !teamForm.email.trim()}>{teamBusy ? "저장 중" : sessionRole === "owner" ? (teamForm.note.trim() && teamForm.role === "editor" ? "초대하고 넘기기" : "공유 저장") : "작업 넘기기"}</button></div>
+              </form>
+            )}
+
+            {sessionRole === "viewer" && <p className="viewer-note">보기 전용 팀원은 작업 기록을 확인할 수 있지만 모델 실행, 도구 승인, 다른 팀원 초대는 할 수 없어요.</p>}
+
+            {teamHandoffs.length > 0 && (
+              <section className="handoff-history">
+                <h3>최근 인계</h3>
+                {teamHandoffs.slice(0, 4).map((handoff) => <p key={handoff.id}><span>{handoff.fromEmail} → {handoff.toEmail}</span><b>{handoff.status === "accepted" ? "이어받음" : "대기 중"}</b></p>)}
+              </section>
+            )}
+          </section>
+        </div>
+      )}
 
       {gardenOpen && (
         <div className="overlay" role="presentation" onMouseDown={() => setGardenOpen(false)}>
@@ -1029,6 +1334,77 @@ export default function Home() {
         </div>
       )}
 
+      {localAgentOpen && (
+        <div className="overlay" role="presentation" onMouseDown={() => setLocalAgentOpen(false)}>
+          <section className="dialog local-agent-dialog" role="dialog" aria-modal="true" aria-label="로컬 터미널 연결" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="dialog-close" onClick={() => setLocalAgentOpen(false)} aria-label="닫기">×</button>
+            <header>
+              <p>Terracotta Local Agent</p>
+              <h2>내 컴퓨터에서 안전하게 실행</h2>
+              <span>Windows PowerShell, macOS zsh, Linux bash를 자동으로 감지합니다.</span>
+            </header>
+
+            <div className="local-agent-safety">
+              <span>1</span><div><b>명령을 먼저 확인</b><small>모델이 제안한 명령과 작업 경로를 채팅에서 보여줍니다.</small></div>
+              <span>2</span><div><b>승인 후에만 실행</b><small>승인하지 않은 명령은 컴퓨터로 전달되지 않습니다.</small></div>
+              <span>3</span><div><b>작업 폴더 안에서만</b><small>시스템 명령, 관리자 권한, 폴더 밖 경로를 로컬에서 다시 차단합니다.</small></div>
+            </div>
+
+            <div className="local-agent-toolbar">
+              <p>{localAgentNote}</p>
+              <button type="button" onClick={() => void loadLocalAgents()} disabled={localAgentBusy}>{localAgentBusy ? "확인 중" : "상태 새로고침"}</button>
+            </div>
+
+            {localAgents.length > 0 && (
+              <div className="local-agent-list">
+                {localAgents.map((agent) => (
+                  <article key={agent.id}>
+                    <i className={agent.online ? "online" : ""} />
+                    <div><b>{agent.name}</b><small>{agent.shell ?? "연결 대기"}{agent.workspace ? ` · ${agent.workspace}` : ""}</small></div>
+                    <em>{agent.online ? "온라인" : "오프라인"}</em>
+                    <button type="button" onClick={() => void revokeLocalAgent(agent.id)} disabled={localAgentBusy}>연결 해제</button>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            <section className="local-agent-pair">
+              <div className="local-agent-section-head">
+                <div><h3>새 컴퓨터 연결</h3><p>Node.js 20 이상이 설치된 터미널에서 두 줄을 실행합니다.</p></div>
+                <div className="local-platform-tabs">
+                  <button type="button" className={localAgentPlatform === "windows" ? "active" : ""} onClick={() => setLocalAgentPlatform("windows")}>Windows</button>
+                  <button type="button" className={localAgentPlatform === "mac" ? "active" : ""} onClick={() => setLocalAgentPlatform("mac")}>macOS / Linux</button>
+                </div>
+              </div>
+              <div className="local-agent-name-row">
+                <input value={localAgentName} onChange={(event) => setLocalAgentName(event.target.value)} maxLength={50} placeholder="예: 회사 노트북" aria-label="컴퓨터 이름" />
+                <button type="button" onClick={() => void pairLocalAgent()} disabled={localAgentBusy}>연결 키 만들기</button>
+              </div>
+              {localAgentToken && (
+                <div className="local-agent-command">
+                  <div><b>{localAgentPlatform === "windows" ? "PowerShell" : "Terminal"}에 붙여넣기</b><small>키는 이 화면에서만 다시 볼 수 있어요.</small></div>
+                  <pre><code>{localAgentCommand}</code></pre>
+                  <button type="button" onClick={() => void navigator.clipboard.writeText(localAgentCommand)}>명령 복사</button>
+                </div>
+              )}
+            </section>
+
+            {localAgentJobs.length > 0 && (
+              <section className="local-agent-history">
+                <div className="local-agent-section-head"><div><h3>최근 실행</h3><p>누가 어떤 명령을 승인했는지 결과와 함께 남습니다.</p></div></div>
+                {localAgentJobs.slice(0, 6).map((job) => (
+                  <details key={job.id}>
+                    <summary><code>{job.command}</code><span className={job.status}>{job.status === "completed" ? "완료" : job.status === "running" ? "실행 중" : job.status === "queued" ? "대기" : "확인 필요"}</span></summary>
+                    <small>{job.cwd} · exit {job.exitCode ?? "—"}</small>
+                    {(job.stdout || job.stderr) && <pre>{job.stdout || job.stderr}</pre>}
+                  </details>
+                ))}
+              </section>
+            )}
+          </section>
+        </div>
+      )}
+
       {modelLabOpen && (
         <div className="overlay" role="presentation" onMouseDown={() => setModelLabOpen(false)}>
           <section className="dialog model-lab-dialog" role="dialog" aria-modal="true" aria-label="모델 연구소" onMouseDown={(event) => event.stopPropagation()}>
@@ -1049,6 +1425,26 @@ export default function Home() {
 
             {modelInsightLoading && !modelInsights && <div className="model-lab-loading"><TerracottaMark size="large" /><b>최신 순위를 모으고 있어요.</b><span>Text · Agent · WebDev · Vision · Search Arena를 확인합니다.</span></div>}
             {!modelInsightLoading && !modelInsights && <div className="model-lab-loading"><b>평가 정보를 불러오지 못했어요.</b><span>잠시 뒤 순위 새로고침을 눌러주세요.</span></div>}
+
+            {visibleModelInsights.length > 0 && (
+              <section className="model-compare">
+                <div className="model-compare-title"><div><b>{modelInsightFilter === "전체" ? "전체 모델 요약" : `${modelInsightFilter} 추천 모델`}</b><small>강점, 대표 평가, 가격을 먼저 비교한 뒤 아래 상세 설명을 확인하세요.</small></div><span>{visibleModelInsights.length}개 모델</span></div>
+                <div className="model-compare-table" role="table" aria-label="모델 핵심 비교">
+                  <div className="model-compare-row heading" role="row"><span>모델</span><span>가장 잘하는 일</span><span>대표 평가</span><span>비용</span></div>
+                  {visibleModelInsights.map((model) => {
+                    const firstArena = arenaMetricOrder.map(({ id, label }) => ({ metric: model.arena[id], label })).find((item) => item.metric);
+                    return (
+                      <div className="model-compare-row" role="row" key={`compare-${model.id}`}>
+                        <span><i>{model.mark}</i><b>{model.name}</b><small>{model.provider}</small></span>
+                        <span><b>{model.bestFor[0] ?? model.categories[0] ?? "범용 작업"}</b><small>{model.summary}</small></span>
+                        <span><b>{model.intelligenceIndex != null ? `AA ${model.intelligenceIndex}` : firstArena?.metric ? `${firstArena.label} #${firstArena.metric.rank}` : "공식 지표 없음"}</b><small>{model.intelligenceIndex != null && firstArena?.metric ? `${firstArena.label} Arena #${firstArena.metric.rank}` : model.context}</small></span>
+                        <span><b>{model.price}</b><small>{model.context}</small></span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
             <div className="model-insight-grid">
               {visibleModelInsights.map((model) => {
