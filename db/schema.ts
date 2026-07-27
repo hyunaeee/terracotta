@@ -114,3 +114,44 @@ export const orchestrationEvents = sqliteTable("orchestration_events", {
   outputSummary: text("output_summary"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const workSessions = sqliteTable("work_sessions", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  title: text("title").notNull(),
+  goal: text("goal").notNull().default(""),
+  lastProvider: text("last_provider"),
+  lastModelId: text("last_model_id"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const workTurns = sqliteTable("work_turns", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  role: text("role").notNull(),
+  provider: text("provider"),
+  modelId: text("model_id"),
+  content: text("content").notNull(),
+  traceJson: text("trace_json").notNull().default("[]"),
+  runId: text("run_id"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const contextHandoffs = sqliteTable("context_handoffs", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  fromProvider: text("from_provider").notNull(),
+  toProvider: text("to_provider").notNull(),
+  packetJson: text("packet_json").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const contextRunLinks = sqliteTable("context_run_links", {
+  runId: text("run_id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

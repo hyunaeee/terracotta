@@ -101,7 +101,7 @@ const treeVarieties = [
   { id: "lavender", name: "라벤더 꽃나무", description: "차분한 보랏빛 꽃으로 자라요", cost: 3400, assets: treeStages.map((_, index) => `/assets/terracotta-lavender-${index}.png`) },
 ] as const;
 
-type OrchestrationStep = { type: "route" | "tool" | "review"; label: string; status: "done" | "approval" | "error" };
+type OrchestrationStep = { type: "route" | "tool" | "review" | "handoff"; label: string; status: "done" | "approval" | "error" };
 type ApprovalRequest = {
   id: string;
   summary: string;
@@ -110,6 +110,7 @@ type ApprovalRequest = {
   status?: "pending" | "running" | "approved" | "rejected";
 };
 type Message = { role: "user" | "assistant"; text: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest };
+type ContextSession = { id: string; title: string; lastProvider: string | null };
 type AssistantPayload = {
   text?: string;
   model?: string;
@@ -120,6 +121,7 @@ type AssistantPayload = {
   approvalRequired?: boolean;
   approval?: ApprovalRequest;
   orchestration?: { runId: string; trace: OrchestrationStep[]; reviewedBy?: string };
+  context?: { sessionId: string; title: string; lastProvider: string; handoff?: { from: string; to: string; label: string } };
 };
 type GardenPosition = { x: number; y: number };
 type GroundTile = { cell: number; grassId: string };
@@ -211,6 +213,11 @@ function McpBrandMark({ id, name }: { id: string; name: string }) {
 export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionTitle, setSessionTitle] = useState("새 작업");
+  const [lastContextProvider, setLastContextProvider] = useState<string | null>(null);
+  const [recentSessions, setRecentSessions] = useState<ContextSession[]>([]);
+  const [contextLoading, setContextLoading] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [sparks, setSparks] = useState(100000);
   const [growth, setGrowth] = useState(0);
@@ -336,7 +343,32 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     void loadRegistry();
+    void loadWorkContext();
   }, [ready]);
+
+  async function loadWorkContext(targetSessionId?: string) {
+    setContextLoading(true);
+    try {
+      const query = targetSessionId ? `?sessionId=${encodeURIComponent(targetSessionId)}` : "";
+      const response = await fetch(`/api/context${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("context unavailable");
+      const payload = await response.json() as {
+        session: ContextSession | null;
+        messages: Message[];
+        recentSessions: ContextSession[];
+      };
+      setSessionId(payload.session?.id ?? null);
+      setSessionTitle(payload.session?.title ?? "새 작업");
+      setLastContextProvider(payload.session?.lastProvider ?? null);
+      setMessages(payload.messages ?? []);
+      setRecentSessions(payload.recentSessions ?? []);
+      setMobileMenu(false);
+    } catch {
+      setSessionId(null);
+    } finally {
+      setContextLoading(false);
+    }
+  }
 
   async function loadRegistry(refresh = false) {
     setRegistryLoading(true);
@@ -501,6 +533,15 @@ export default function Home() {
 
   function addAssistantResult(payload: AssistantPayload, fallbackModel: string) {
     const trace = payload.orchestration?.trace ?? [];
+    if (payload.context) {
+      setSessionId(payload.context.sessionId);
+      setSessionTitle(payload.context.title);
+      setLastContextProvider(payload.context.lastProvider);
+      setRecentSessions((items) => [
+        { id: payload.context!.sessionId, title: payload.context!.title, lastProvider: payload.context!.lastProvider },
+        ...items.filter((item) => item.id !== payload.context!.sessionId),
+      ].slice(0, 8));
+    }
     if (payload.approvalRequired && payload.approval) {
       setMessages((items) => [...items, {
         role: "assistant",
@@ -535,7 +576,7 @@ export default function Home() {
     setPrompt("");
     setIsWorking(true);
     try {
-      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference }) });
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference, sessionId }) });
       const payload = await response.json() as AssistantPayload;
       if (!response.ok) {
         setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "연결 설정 필요" }]);
@@ -691,23 +732,34 @@ export default function Home() {
     return { left: `${position.x}%`, top: `${position.y}%`, zIndex: Math.round(2 + position.y / 10) };
   }
 
-  function newChat() {
+  async function newChat() {
     setMessages([]);
     setPrompt("");
     setMobileMenu(false);
+    setSessionTitle("새 작업");
+    setLastContextProvider(null);
+    try {
+      const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "new" }) });
+      if (!response.ok) throw new Error("new context unavailable");
+      const payload = await response.json() as { session: ContextSession };
+      setSessionId(payload.session.id);
+      setRecentSessions((items) => [payload.session, ...items.filter((item) => item.id !== payload.session.id)].slice(0, 8));
+    } catch {
+      setSessionId(`new-${Date.now()}`);
+    }
   }
 
   return (
     <main className="app-frame">
       <aside className={`sidebar ${mobileMenu ? "open" : ""}`}>
         <div className="sidebar-top">
-          <button className="wordmark" onClick={newChat} aria-label="테라코타 홈">
+          <button className="wordmark" onClick={() => void newChat()} aria-label="테라코타 홈">
             <TerracottaMark /> Terracotta
           </button>
           <button className="sidebar-close" onClick={() => setMobileMenu(false)} aria-label="메뉴 닫기">×</button>
         </div>
 
-        <button className="new-chat" onClick={newChat}><span>＋</span> 새 대화</button>
+        <button className="new-chat" onClick={() => void newChat()}><span>＋</span> 새 작업</button>
 
         <nav className="sidebar-nav" aria-label="주요 메뉴">
           <button className="active" onClick={() => setMobileMenu(false)}><span>○</span> 대화</button>
@@ -718,10 +770,10 @@ export default function Home() {
         </nav>
 
         <div className="recents">
-          <p>최근 대화</p>
-          <button>이번 주 업무 정리</button>
-          <button>신제품 아이디어</button>
-          <button>영상 콘티 초안</button>
+          <p>최근 작업</p>
+          {recentSessions.length ? recentSessions.map((session) => (
+            <button className={session.id === sessionId ? "active" : ""} key={session.id} onClick={() => void loadWorkContext(session.id)}>{session.title}</button>
+          )) : <small>{contextLoading ? "기억을 불러오는 중…" : "아직 저장된 작업이 없어요."}</small>}
         </div>
 
         <div className="sidebar-account">
@@ -739,7 +791,7 @@ export default function Home() {
           <button className="model-switch" onClick={() => setSettingsOpen(true)}>
             Terracotta Auto · {preferenceLabel} <span>⌄</span>
           </button>
-          <span className="private-state"><i /> 개인 메모리 켜짐</span>
+          <span className="private-state"><i /> GPT ↔ Claude 공용 기억</span>
         </header>
 
         <div className={`conversation ${messages.length ? "has-messages" : ""}`}>
@@ -761,7 +813,7 @@ export default function Home() {
                   {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
                   <div>
                     <p>{message.text}</p>
-                    {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={step.status} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
+                    {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={`${step.status} ${step.type}`} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
                     {message.approval && (
                       <section className={`tool-approval ${message.approval.status ?? "pending"}`} aria-label="외부 작업 승인">
                         <div className="tool-approval-head"><b>실행 전 확인</b><span>{message.approval.actions.length}개 작업</span></div>
@@ -793,6 +845,17 @@ export default function Home() {
         </div>
 
         <div className="composer-wrap">
+          <div className="context-bridge" aria-label="모델 공용 작업 기억">
+            <div className="context-bridge-copy">
+              <i />
+              <span><b>{sessionTitle}</b><small>{lastContextProvider ? `${lastContextProvider === "openai" ? "GPT" : lastContextProvider === "anthropic" ? "Claude" : "Perplexity"}에서 이어갈 준비됨` : "GPT와 Claude가 같은 작업 기록을 사용해요"}</small></span>
+            </div>
+            <div className="context-bridge-actions">
+              <button type="button" className={modelPreference === "gpt" ? "active" : ""} onClick={() => setModelPreference("gpt")}>GPT로 이어하기</button>
+              <button type="button" className={modelPreference === "claude" ? "active" : ""} onClick={() => setModelPreference("claude")}>Claude로 이어하기</button>
+              <button type="button" onClick={() => void newChat()}>새 작업</button>
+            </div>
+          </div>
           <form className="composer" onSubmit={submitTask}>
             <textarea
               value={prompt}

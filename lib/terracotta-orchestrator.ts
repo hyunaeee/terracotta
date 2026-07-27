@@ -13,6 +13,17 @@ import {
   type RegistryRow,
   type TaskKind,
 } from "./terracotta-router";
+import {
+  appendAssistantTurn,
+  appendUserTurn,
+  buildProviderHistory,
+  linkRunToSession,
+  prepareWorkSession,
+  recordContextHandoff,
+  sessionForRun,
+  type ContextHandoff,
+  type WorkSession,
+} from "./work-context";
 
 type JsonSchema = Record<string, unknown>;
 type ToolRisk = "read" | "write";
@@ -46,7 +57,7 @@ type ToolResult = { callId: string; output: string; isError: boolean };
 type PendingCall = ToolCall & { tool: OrchestratorTool; result?: ToolResult };
 
 export type OrchestrationTrace = {
-  type: "route" | "tool" | "review";
+  type: "route" | "tool" | "review" | "handoff";
   label: string;
   status: "done" | "approval" | "error";
 };
@@ -67,6 +78,12 @@ export type AssistantResult = {
     actions: Array<{ service: string; tool: string; arguments: Record<string, unknown> }>;
   };
   orchestration: { runId: string; trace: OrchestrationTrace[]; reviewedBy?: string };
+  context: {
+    sessionId: string;
+    title: string;
+    lastProvider: string;
+    handoff?: { from: string; to: string; label: string };
+  };
 };
 
 type RunRow = {
@@ -99,6 +116,8 @@ const orchestrationSchema = [
 ];
 
 const SYSTEM_PROMPT = `You are Terracotta, a private AI orchestrator. Analyze the user's actual goal before acting.
+- You may be continuing a provider-neutral Terracotta work session previously handled by another model. Treat the visible conversation and verified tool summaries as the canonical shared context.
+- Continue completed work without restarting it. Never claim that hidden reasoning or private chain-of-thought was transferred.
 - Use connected tools only when they materially improve accuracy or complete a requested action.
 - Read-only tools may run automatically. Tools marked approval-required can change external data; request them only when the user clearly asked for that action.
 - Never invent tool results. If a tool fails, explain the limitation and continue safely.
@@ -326,11 +345,14 @@ async function reviewAnswer(request: Request, runId: string, prompt: string, dra
 }
 
 async function runProviderAgent(args: {
-  request: Request; runId: string; prompt: string; preference: ModelPreference; task: TaskKind; provider: PlannerProvider; model: RegistryRow; models: RegistryRow[]; tools: OrchestratorTool[]; state?: ProviderState; trace?: OrchestrationTrace[]; costMicros?: number;
+  request: Request; runId: string; prompt: string; preference: ModelPreference; task: TaskKind; provider: PlannerProvider; model: RegistryRow; models: RegistryRow[]; tools: OrchestratorTool[]; session: WorkSession; handoff?: ContextHandoff | null; state?: ProviderState; trace?: OrchestrationTrace[]; costMicros?: number;
 }): Promise<AssistantResult> {
-  const { request, runId, prompt, task, provider, model, models, tools } = args;
+  const { request, runId, prompt, task, provider, model, models, tools, session, handoff } = args;
   let state = args.state ?? (provider === "openai" ? { kind: "openai" as const, input: [{ role: "user", content: prompt }] } : { kind: "anthropic" as const, messages: [{ role: "user", content: prompt }] });
-  let trace = args.trace ?? [{ type: "route" as const, label: `${model.display_name}가 요청과 도구를 분석`, status: "done" as const }];
+  let trace = args.trace ?? [
+    ...(handoff ? [{ type: "handoff" as const, label: handoff.label, status: "done" as const }] : []),
+    { type: "route" as const, label: `${model.display_name}가 요청과 도구를 분석`, status: "done" as const },
+  ];
   let costMicros = args.costMicros ?? 0;
 
   await updateRunProvider(runId, provider, model.model_id);
@@ -355,7 +377,12 @@ async function runProviderAgent(args: {
         }
       }
       await completeRun(request, runId, trace, costMicros);
-      return { text, provider, model: model.model_id, task, costUsd: costMicros / 1_000_000, citations: [], live: true, orchestration: { runId, trace, ...(reviewedBy ? { reviewedBy } : {}) } };
+      await appendAssistantTurn(request, session.id, { provider, model: model.model_id, text, runId, trace });
+      return {
+        text, provider, model: model.model_id, task, costUsd: costMicros / 1_000_000, citations: [], live: true,
+        orchestration: { runId, trace, ...(reviewedBy ? { reviewedBy } : {}) },
+        context: { sessionId: session.id, title: session.title, lastProvider: provider, ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
+      };
     }
 
     const alreadyPlanned = trace.filter((item) => item.type === "tool").length;
@@ -388,6 +415,7 @@ async function runProviderAgent(args: {
         provider, model: model.model_id, task, costUsd: costMicros / 1_000_000, citations: [], live: true, approvalRequired: true,
         approval: { id: runId, summary: "외부 서비스의 데이터를 변경하는 작업입니다. 아래 내용을 확인해 주세요.", expiresAt, actions: pendingWrites.map((call) => ({ service: call.tool.connectionName, tool: call.tool.toolName, arguments: call.args })) },
         orchestration: { runId, trace },
+        context: { sessionId: session.id, title: session.title, lastProvider: provider, ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
       };
     }
 
@@ -398,7 +426,12 @@ async function runProviderAgent(args: {
   costMicros += await recordUsage(runtimeEnv().DB, { provider, model: model.model_id, text: finalTurn.text, inputUnits: finalTurn.inputUnits, outputUnits: finalTurn.outputUnits }, task, model);
   const text = finalTurn.text || "도구 실행은 마쳤지만 최종 답변을 만들지 못했어요.";
   await completeRun(request, runId, trace, costMicros);
-  return { text, provider, model: model.model_id, task, costUsd: costMicros / 1_000_000, citations: [], live: true, orchestration: { runId, trace } };
+  await appendAssistantTurn(request, session.id, { provider, model: model.model_id, text, runId, trace });
+  return {
+    text, provider, model: model.model_id, task, costUsd: costMicros / 1_000_000, citations: [], live: true,
+    orchestration: { runId, trace },
+    context: { sessionId: session.id, title: session.title, lastProvider: provider, ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
+  };
 }
 
 function routingOrder(preference: ModelPreference, models: RegistryRow[]) {
@@ -414,7 +447,7 @@ async function checkBudget() {
   if (Number(spent?.cost ?? 0) >= budget) throw Object.assign(new Error("이번 달 공급사 원가 예산에 도달했습니다."), { code: "BUDGET_EXHAUSTED", status: 402 });
 }
 
-export async function runAssistant(request: Request, prompt: string, preference: ModelPreference): Promise<AssistantResult> {
+export async function runAssistant(request: Request, prompt: string, preference: ModelPreference, sessionId?: string | null): Promise<AssistantResult> {
   await syncProviderRegistry(false);
   await checkBudget();
   const task = classifyTask(prompt);
@@ -425,12 +458,19 @@ export async function runAssistant(request: Request, prompt: string, preference:
   if (task === "creative" && !creativeTools.length) throw Object.assign(new Error("이미지·영상 생성 MCP를 먼저 연결해 주세요."), { code: "HIGGSFIELD_MCP_AUTH_REQUIRED", status: 409 });
 
   const run = await createRun(request, prompt, preference, task);
+  const work = await prepareWorkSession(request, sessionId, prompt);
+  await linkRunToSession(request, run.id, work.session.id);
+  await appendUserTurn(request, work.session.id, prompt, run.id);
   const order = routingOrder(preference, models);
   const errors: string[] = [];
   for (const provider of order) {
     const model = models.find((item) => item.provider === provider);
     if (!model) continue;
-    try { return await runProviderAgent({ request, runId: run.id, prompt, preference, task, provider, model, models, tools: task === "creative" ? creativeTools : tools }); }
+    try {
+      const handoff = await recordContextHandoff(request, work.session, provider, work.turns, prompt);
+      const state = buildProviderHistory(provider, work.turns, prompt);
+      return await runProviderAgent({ request, runId: run.id, prompt, preference, task, provider, model, models, tools: task === "creative" ? creativeTools : tools, session: work.session, handoff, state });
+    }
     catch (error) {
       errors.push(error instanceof Error ? error.message : `${provider} failed`);
       await recordEvent(request, run.id, { type: "model", provider, model: model.model_id, status: "failed", output: errors.at(-1) });
@@ -438,12 +478,21 @@ export async function runAssistant(request: Request, prompt: string, preference:
   }
 
   if (configured(runtimeEnv(), "perplexity")) {
+    const handoff = await recordContextHandoff(request, work.session, "perplexity", work.turns, prompt);
     const invocation = await invokePerplexity(runtimeEnv().PERPLEXITY_API_KEY!, prompt);
     const costMicros = await recordUsage(runtimeEnv().DB, invocation, task, models.find((item) => item.provider === "perplexity"));
     await runtimeEnv().DB.prepare("UPDATE orchestration_runs SET provider='perplexity', model_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=?").bind(invocation.model, run.id, ownerId(request)).run();
-    const trace: OrchestrationTrace[] = [{ type: "route", label: "Perplexity Sonar Pro 단독 리서치", status: "done" }];
+    const trace: OrchestrationTrace[] = [
+      ...(handoff ? [{ type: "handoff" as const, label: handoff.label, status: "done" as const }] : []),
+      { type: "route", label: "Perplexity Sonar Pro 단독 리서치", status: "done" },
+    ];
     await completeRun(request, run.id, trace, costMicros);
-    return { text: invocation.text, provider: "perplexity", model: invocation.model, task, costUsd: costMicros / 1_000_000, citations: invocation.citations ?? [], live: true, orchestration: { runId: run.id, trace } };
+    await appendAssistantTurn(request, work.session.id, { provider: "perplexity", model: invocation.model, text: invocation.text, runId: run.id, trace });
+    return {
+      text: invocation.text, provider: "perplexity", model: invocation.model, task, costUsd: costMicros / 1_000_000, citations: invocation.citations ?? [], live: true,
+      orchestration: { runId: run.id, trace },
+      context: { sessionId: work.session.id, title: work.session.title, lastProvider: "perplexity", ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
+    };
   }
   throw Object.assign(new Error(errors.join(" · ") || "OpenAI, Anthropic 또는 Perplexity API 키가 필요합니다."), { code: order.length ? "PROVIDER_ERROR" : "PROVIDER_KEY_REQUIRED", status: order.length ? 502 : 503 });
 }
@@ -481,5 +530,7 @@ export async function resolveApproval(request: Request, approvalId: string, deci
   await db.prepare("UPDATE orchestration_runs SET status='running', pending_calls_json='[]', updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=?").bind(run.id, ownerId(request)).run();
   const model = models.find((item) => item.provider === run.provider && item.model_id === run.model_id) ?? models.find((item) => item.provider === run.provider);
   if (!model) throw Object.assign(new Error("승인 후 작업을 이어갈 모델을 찾지 못했어요."), { code: "MODEL_UNAVAILABLE", status: 503 });
-  return runProviderAgent({ request, runId: run.id, prompt: run.prompt, preference: run.preference, task: run.task_kind, provider: run.provider, model, models, tools, state: appendResults(state, results), trace, costMicros });
+  const session = await sessionForRun(request, run.id);
+  if (!session) throw Object.assign(new Error("이 작업의 공용 컨텍스트를 찾지 못했어요."), { code: "CONTEXT_NOT_FOUND", status: 409 });
+  return runProviderAgent({ request, runId: run.id, prompt: run.prompt, preference: run.preference, task: run.task_kind, provider: run.provider, model, models, tools, session, state: appendResults(state, results), trace, costMicros });
 }

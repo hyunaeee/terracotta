@@ -29,6 +29,7 @@ Terracotta는 GPT, Claude, Perplexity, Higgsfield처럼 서로 다른 강점을 
 ## 현재 구현된 것
 
 - **멀티 모델 라우터** — OpenAI, Anthropic, Perplexity, Higgsfield 연결 상태와 사용량 예산을 한곳에서 관리합니다.
+- **GPT ↔ Claude 공용 작업 기억** — 대화·최종 결과·검증된 도구 기록을 Terracotta 소유의 D1 세션에 저장해 모델을 바꿔도 같은 작업을 이어갑니다.
 - **자동 오케스트레이터** — 질문을 분석해 모델과 연결된 MCP 도구를 선택하고, 읽기 도구는 자동 실행한 뒤 결과를 다시 모델이 검증·정리합니다.
 - **안전한 실행 승인** — 메시지 전송·수정·삭제처럼 외부 상태를 바꾸는 작업은 서비스·도구·인자를 보여준 뒤 사용자 승인으로만 실행합니다.
 - **자동 모델 레지스트리** — 연결된 공급사의 모델 목록을 주기적으로 확인하고 최신 우선순위를 갱신합니다.
@@ -46,7 +47,8 @@ Terracotta는 GPT, Claude, Perplexity, Higgsfield처럼 서로 다른 강점을 
 
 ```mermaid
 flowchart LR
-  U["사용자 요청"] --> R["Terracotta Router"]
+  U["사용자 요청"] --> M["Terracotta 공용 작업 기억"]
+  M --> R["Terracotta Router"]
   R --> O["OpenAI"]
   R --> A["Anthropic"]
   R --> P["Perplexity"]
@@ -55,6 +57,7 @@ flowchart LR
   A --> C
   P --> C
   H --> C
+  C --> M
   C --> S["Sparks · 가든 성장"]
 ```
 
@@ -65,7 +68,8 @@ flowchart LR
 1. **라우팅** — 과제 분류(general/research/creative) 후 선호 설정과 최신 모델 랭킹으로 플래너 선택. 리서치성 요청은 Perplexity로 위임
 2. **도구 루프** — 연결된 MCP 도구를 플래너가 호출. 쓰기(write) 위험 도구는 즉시 실행하지 않고 **승인 대기**로 전환(만료 시간 포함), 요청당 도구 호출 상한 적용
 3. **교차 검토** — "교차 검증", "second opinion" 류 요청이면 **다른 공급사의 백업 모델**이 초안의 사실 오류·누락을 검토해 최종본 작성 (`reviewedBy`로 표기)
-4. **기록** — 모든 단계가 orchestration trace(route/tool/review)로 남고, 비용은 사용량 원장에 적립되어 월 예산 가드와 연동
+4. **컨텍스트 인계** — 모델이 바뀌면 사용자에게 보인 대화·최종 출력·검증된 도구 요약만 공용 세션에서 넘기며, 비공개 추론 과정은 전달하지 않음
+5. **기록** — 모든 단계가 orchestration trace(route/tool/review/handoff)로 남고, 비용은 사용량 원장에 적립되어 월 예산 가드와 연동
 
 > 같은 원칙(다중 에이전트 협업 + 검증 + 평가)을 최소 형태로 정리한 레퍼런스: [agent-orchestra](https://github.com/hyunaeee/agent-orchestra)
 
@@ -171,6 +175,7 @@ API 키는 서버 환경변수로만 설정하고 `NEXT_PUBLIC_` 접두사를 �
 app/                     UI와 API routes
 lib/terracotta-router.ts 모델 레지스트리·라우팅·비용 기록
 lib/mcp-hub.ts           MCP 연결·OAuth·도구 호출
+lib/work-context.ts      공급사 중립 작업 세션·컨텍스트 인계
 db/                      D1 스키마
 drizzle/                 데이터베이스 마이그레이션
 public/assets/garden/    개별 비트맵 가드닝 아이템

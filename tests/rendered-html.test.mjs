@@ -175,3 +175,40 @@ test("orchestrates models and MCP tools with durable write approval", async () =
   assert.match(migration, /CREATE TABLE `orchestration_runs`/);
   assert.match(migration, /CREATE TABLE `orchestration_events`/);
 });
+
+test("persists provider-neutral work context and hands it between GPT and Claude", async () => {
+  const [context, contextRoute, assistantRoute, orchestrator, page, css, schema, migration] = await Promise.all([
+    source("lib/work-context.ts"),
+    source("app/api/context/route.ts"),
+    source("app/api/assistant/route.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("db/schema.ts"),
+    source("drizzle/0004_sturdy_toad_men.sql"),
+  ]);
+
+  assert.match(context, /work_sessions/);
+  assert.match(context, /work_turns/);
+  assert.match(context, /context_handoffs/);
+  assert.match(context, /context_run_links/);
+  assert.match(context, /buildProviderHistory/);
+  assert.match(context, /Hidden reasoning is never transferred/);
+  assert.match(contextRoute, /recentSessions/);
+  assert.match(contextRoute, /private, no-store/);
+  assert.match(assistantRoute, /payload\.sessionId/);
+  assert.match(orchestrator, /recordContextHandoff/);
+  assert.match(orchestrator, /appendAssistantTurn/);
+  assert.match(orchestrator, /provider-neutral Terracotta work session/);
+  assert.match(page, /GPT로 이어하기/);
+  assert.match(page, /Claude로 이어하기/);
+  assert.match(page, /GPT ↔ Claude 공용 기억/);
+  assert.match(css, /\.context-bridge/);
+  assert.match(css, /\.orchestration-trace span\.handoff/);
+  assert.match(schema, /workSessions/);
+  assert.match(schema, /workTurns/);
+  assert.match(schema, /contextHandoffs/);
+  assert.match(migration, /CREATE TABLE `work_sessions`/);
+  assert.match(migration, /CREATE TABLE `work_turns`/);
+  assert.match(migration, /CREATE TABLE `context_handoffs`/);
+});

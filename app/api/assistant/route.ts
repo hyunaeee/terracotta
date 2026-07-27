@@ -3,7 +3,7 @@ import { routeError, type ModelPreference } from "../../../lib/terracotta-router
 
 export async function POST(request: Request) {
   try {
-    const payload = await request.json() as { prompt?: string; preference?: ModelPreference; approvalId?: string; decision?: "approve" | "reject" };
+    const payload = await request.json() as { prompt?: string; preference?: ModelPreference; sessionId?: string; approvalId?: string; decision?: "approve" | "reject" };
     if (payload.approvalId && (payload.decision === "approve" || payload.decision === "reject")) {
       const result = await resolveApproval(request, payload.approvalId, payload.decision);
       return Response.json(result, { status: result.approvalRequired ? 202 : 200 });
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const preference = payload.preference && ["latest", "gpt", "claude"].includes(payload.preference) ? payload.preference : "latest";
     if (!prompt) return Response.json({ error: "prompt is required" }, { status: 400 });
     if (prompt.length > 20_000) return Response.json({ error: "prompt is too long" }, { status: 413 });
-    const result = await runAssistant(request, prompt, preference);
+    const result = await runAssistant(request, prompt, preference, payload.sessionId);
     return Response.json(result, { status: result.approvalRequired ? 202 : 200 });
   } catch (error) {
     const routed = routeError(error);
