@@ -9,10 +9,6 @@
 </p>
 
 <p align="center">
-  <a href="https://orbit-ai-companion.likecorp817.chatgpt.site">Live prototype</a>
-  ·
-  <a href="./SELF_HOSTING.md">Self-host with Docker</a>
-  ·
   <a href="#로컬에서-실행하기">Run locally</a>
   ·
   <a href="#로드맵">Roadmap</a>
@@ -40,7 +36,6 @@ Terracotta는 GPT, Claude, Perplexity, Higgsfield처럼 서로 다른 강점을 
 - **MCP Hub** — GitHub, Notion, Figma, Linear, Google Drive, Slack 등 다양한 MCP 연결을 검색하고 관리합니다.
 - **보안 중심 MCP OAuth** — PKCE S256, AES-GCM 토큰 암호화, HTTPS 전용 연결과 내부 네트워크 주소 차단을 적용합니다.
 - **구독 프로토타입** — 모델·검색·이미지·영상 사용량을 함께 고려한 크레딧 플랜과 월간 공급사 비용 가드를 제공합니다.
-- **한 명령 셀프호스팅** — Docker Compose로 웹 버전과 같은 Worker 앱을 실행하고 D1·MCP 암호화 키를 전용 볼륨에 보존합니다.
 
 ## 제품 흐름
 
@@ -103,27 +98,12 @@ node bench/routing-bench.mjs
 
 ## 로컬에서 실행하기
 
-### Docker로 셀프호스팅 (권장)
-
-```bash
-git clone https://github.com/hyunaeee/terracotta.git
-cd terracotta
-cp .env.selfhost.example .env
-docker compose up -d --build
-```
-
-브라우저에서 [http://localhost:3000](http://localhost:3000)을 열면 됩니다. Windows PowerShell에서는 `cp` 대신 `Copy-Item`을 사용하세요. 데이터는 `terracotta-data` 볼륨에 유지되고 MCP 토큰 암호화 키는 최초 실행 때 자동 생성됩니다.
-
-업데이트, 백업, 외부 공개 전 보안 설정은 [셀프호스팅 가이드](./SELF_HOSTING.md)에 정리되어 있습니다.
-
-### 개발 서버로 실행
-
-#### 요구 사항
+### 요구 사항
 
 - Node.js `>=22.13.0`
 - npm
 
-#### 설치
+### 설치
 
 ```bash
 git clone https://github.com/hyunaeee/terracotta.git
@@ -135,7 +115,7 @@ npm run dev
 
 개발 서버가 안내하는 로컬 주소를 브라우저에서 열면 됩니다. macOS와 Linux에서는 `copy` 대신 `cp`를 사용하세요.
 
-#### 환경 변수
+### 환경 변수
 
 | 변수 | 용도 |
 | --- | --- |
@@ -163,7 +143,6 @@ API 키는 서버 환경변수로만 설정하고 `NEXT_PUBLIC_` 접두사를 �
 | `npm test` | 빌드 및 핵심 제품 동작 검증 |
 | `npm run lint` | 코드 정적 검사 |
 | `npm run db:generate` | Drizzle 마이그레이션 생성 |
-| `docker compose up -d --build` | 셀프호스트 앱 빌드 및 백그라운드 실행 |
 
 ## 프로젝트 구조
 
@@ -175,7 +154,6 @@ db/                      D1 스키마
 drizzle/                 데이터베이스 마이그레이션
 public/assets/garden/    개별 비트맵 가드닝 아이템
 public/assets/mcp/       MCP 서비스 브랜드 아이콘
-docker/                  셀프호스트 초기화·헬스체크
 tests/                   제품 동작 검증
 ```
 
