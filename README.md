@@ -73,19 +73,24 @@ flowchart LR
 node bench/routing-bench.mjs
 ```
 
-24개 태스크(일반 8 · 리서치 8 · 창작 8), 문서화된 품질 루브릭 기준:
+24개 태스크(일반 8 · 리서치 8 · 창작 8), 공식 가격표 기반 비용 비교:
 
-| 정책 | 평균 품질 | 태스크당 비용 |
-|---|---|---|
-| **terracotta auto (latest-first)** | 0.967 | **$0.0138** |
-| terracotta claude-first | **1.000** | $0.0213 |
-| baseline: always GPT-5.6 | 0.833 | $0.0169 |
-| baseline: always Claude Fable 5 | 0.867 | $0.0289 |
-| baseline: always Sonnet 5 (저가 고정) | 0.867 | $0.0087 |
+| 정책 | 태스크당 비용 |
+|---|---|
+| **terracotta auto (latest-first)** | **$0.0138** |
+| terracotta claude-first | $0.0213 |
+| baseline: always GPT-5.6 | $0.0169 |
+| baseline: always Claude Fable 5 | $0.0289 |
+| baseline: always Sonnet 5 (저가 고정) | $0.0087 |
 
-- auto vs 최고가 단일 모델(Fable 5 고정): **비용 −52.4% · 품질 +11.5%**
-- auto vs GPT-5.6 고정: 비용 −18.7% · 품질 +16.1%
-- 저가 고정(Sonnet 5)보다 비싸지만 리서치·창작 품질을 포기하지 않음 — 라우팅의 존재 이유
+- auto vs 최고가 단일 모델(Fable 5 고정): **비용 −52.4%**
+- auto vs GPT-5.6 고정: 비용 −18.7%
+- 반대로 저가 고정(Sonnet 5) 대비는 **+58.8% 더 비쌈** — 라우팅이 이득이 되는 조건과 아닌 조건을 함께 리포트
+
+> 품질 축은 게시하지 않습니다. 벤치의 품질 값은 측정이 아니라 직접 정의한 루브릭 상수이고,
+> 실제 분류기(`classifyTask`)를 태스크셋에 돌리면 손라벨과 24개 중 13개가 불일치해 품질 이득이
+> 크게 축소되는 것을 확인했습니다. 비용 축은 공식 단가표 산술이라 그대로 둡니다.
+> 분류기 정확도 개선이 다음 작업입니다.
 
 ## 기술 구성
 
