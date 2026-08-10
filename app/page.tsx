@@ -9,7 +9,7 @@ const quickPrompts = [
   "새 프로젝트 아이디어를 같이 생각해줘",
 ];
 
-type ModelPreference = "latest" | "gpt" | "claude";
+type ModelPreference = "latest" | "gpt" | "claude" | "gemini";
 type RegistryStatus = {
   syncIntervalHours: number;
   latestPrimary: { provider: string; model: string; modelId: string; source: string } | null;
@@ -40,14 +40,16 @@ const modelCatalog = [
   { id: "gpt", provider: "openai", mark: "G", name: "GPT-5.6 Sol", role: "주 추론 · 코딩" },
   { id: "fable", provider: "anthropic", mark: "F", name: "Claude Fable 5", role: "최고 난도 · 장기 에이전트" },
   { id: "claude", provider: "anthropic", mark: "C", name: "Claude Sonnet 5", role: "빠른 에이전트 · 문서" },
+  { id: "gemini", provider: "google", mark: "M", name: "Gemini 3.6 Flash", role: "멀티모달 · 빠른 에이전트" },
   { id: "perplexity", provider: "perplexity", mark: "P", name: "Perplexity Sonar Pro", role: "웹 검색 · 리서치" },
   { id: "higgsfield", provider: "higgsfield", mark: "H", name: "Higgsfield", role: "이미지 · 영상" },
 ];
 
 const preferenceOptions: { id: ModelPreference; title: string; description: string }[] = [
   { id: "latest", title: "최신 모델 우선", description: "공식 최신 목록이 바뀌면 GPT와 Claude의 순서를 자동으로 바꿔요." },
-  { id: "gpt", title: "GPT 우선", description: "GPT를 먼저 쓰고, 필요할 때 Claude가 검토하거나 이어받아요." },
-  { id: "claude", title: "Claude 우선", description: "Claude를 먼저 쓰고, 필요할 때 GPT가 검토하거나 이어받아요." },
+  { id: "gpt", title: "GPT 우선", description: "GPT를 먼저 쓰고, Gemini와 Claude가 검토하거나 이어받아요." },
+  { id: "claude", title: "Claude 우선", description: "Claude를 먼저 쓰고, Gemini와 GPT가 검토하거나 이어받아요." },
+  { id: "gemini", title: "Gemini 우선", description: "Gemini를 먼저 쓰고, GPT와 Claude가 검토하거나 이어받아요." },
 ];
 
 const subscriptionPlans = [
@@ -111,15 +113,36 @@ type ApprovalRequest = {
 };
 type SessionRole = "owner" | "editor" | "viewer";
 type Message = { role: "user" | "assistant"; text: string; author?: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest };
-type ContextSession = { id: string; title: string; lastProvider: string | null; ownerEmail?: string; role?: SessionRole };
+type ContextSession = { id: string; projectId?: string | null; title: string; lastProvider: string | null; ownerEmail?: string; role?: SessionRole };
 type TeamMember = { email: string; role: SessionRole; invitedBy: string | null; createdAt: string };
 type TeamHandoff = { id: string; fromEmail: string; toEmail: string; note: string; status: "pending" | "accepted"; createdAt: string };
+type ModelHandoff = { id: string; from: string; to: string; createdAt: string };
+type WorkspaceProject = {
+  id: string;
+  name: string;
+  description: string;
+  agentId: string | null;
+  rootPath: string;
+  instructions: string;
+  modelPreference: ModelPreference;
+  fileAccess: "read-only" | "read-write";
+  commandAccess: "disabled" | "approval";
+  color: string;
+  updatedAt: string;
+};
+type ProjectActivity = { id: string; action: string; path: string | null; status: string; summary: string; created_at: string };
+type ProjectFile = { path: string; type: "file" | "directory"; size: number; modifiedAt: string };
+type ProjectDocument = { path: string; content: string; hash: string; size: number; modifiedAt: string };
+type ProjectSearchMatch = { path: string; line: number | null; preview: string };
 type ContextPayload = {
   currentUser: string;
+  selectedProjectId: string | null;
   session: ContextSession | null;
   messages: Message[];
   members: TeamMember[];
   handoffs: TeamHandoff[];
+  modelHandoffs: ModelHandoff[];
+  projects: WorkspaceProject[];
   recentSessions: ContextSession[];
   error?: string;
 };
@@ -133,7 +156,7 @@ type AssistantPayload = {
   approvalRequired?: boolean;
   approval?: ApprovalRequest;
   orchestration?: { runId: string; trace: OrchestrationStep[]; reviewedBy?: string };
-  context?: { sessionId: string; title: string; lastProvider: string; handoff?: { from: string; to: string; label: string } };
+  context?: { sessionId: string; projectId: string | null; title: string; lastProvider: string; handoff?: { from: string; to: string; label: string } };
 };
 type GardenPosition = { x: number; y: number };
 type GroundTile = { cell: number; grassId: string };
@@ -178,12 +201,15 @@ type LocalAgent = {
 type LocalAgentJob = {
   id: string;
   agentId: string;
+  projectId?: string | null;
+  operation?: string;
   command: string;
   cwd: string;
   status: string;
   stdout: string;
   stderr: string;
   exitCode: number | null;
+  changedFiles?: Array<{ path?: string; action?: string }>;
   createdAt: string;
   completedAt: string | null;
 };
@@ -254,6 +280,9 @@ export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+  const [modelHandoffs, setModelHandoffs] = useState<ModelHandoff[]>([]);
   const [sessionTitle, setSessionTitle] = useState("새 작업");
   const [lastContextProvider, setLastContextProvider] = useState<string | null>(null);
   const [recentSessions, setRecentSessions] = useState<ContextSession[]>([]);
@@ -302,6 +331,20 @@ export default function Home() {
   const [localAgentToken, setLocalAgentToken] = useState<string | null>(null);
   const [localAgentPlatform, setLocalAgentPlatform] = useState<"windows" | "mac">("windows");
   const [localAgentNote, setLocalAgentNote] = useState("연결 후 채팅에서 파일 수정·빌드·테스트를 요청할 수 있어요.");
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [projectTab, setProjectTab] = useState<"overview" | "files" | "changes">("overview");
+  const [projectEditingId, setProjectEditingId] = useState<string | null>(null);
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [projectNote, setProjectNote] = useState("컴퓨터와 폴더를 연결하면 모델이 프로젝트 안에서만 작업합니다.");
+  const [projectForm, setProjectForm] = useState({ name: "", description: "", agentId: "", rootPath: ".", instructions: "", modelPreference: "latest" as ModelPreference, fileAccess: "read-write" as "read-only" | "read-write", commandAccess: "approval" as "disabled" | "approval" });
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [projectFile, setProjectFile] = useState<ProjectDocument | null>(null);
+  const [projectFileContent, setProjectFileContent] = useState("");
+  const [projectFilePath, setProjectFilePath] = useState("");
+  const [projectSearchQuery, setProjectSearchQuery] = useState("");
+  const [projectSearchResults, setProjectSearchResults] = useState<ProjectSearchMatch[]>([]);
+  const [projectDiff, setProjectDiff] = useState({ status: "", diff: "", staged: "" });
+  const [projectActivities, setProjectActivities] = useState<ProjectActivity[]>([]);
   const [modelPreference, setModelPreference] = useState<ModelPreference>("latest");
   const [registryStatus, setRegistryStatus] = useState<RegistryStatus | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
@@ -313,7 +356,7 @@ export default function Home() {
   /* eslint-disable react-hooks/set-state-in-effect -- browser-persisted owner preferences hydrate once after mount */
   useEffect(() => {
     const savedPreference = window.localStorage.getItem("terracotta-model-preference");
-    if (savedPreference === "latest" || savedPreference === "gpt" || savedPreference === "claude") {
+    if (savedPreference === "latest" || savedPreference === "gpt" || savedPreference === "claude" || savedPreference === "gemini") {
       setModelPreference(savedPreference);
     }
     const saved = window.localStorage.getItem("terracotta-garden-v3");
@@ -405,6 +448,8 @@ export default function Home() {
 
   function applyContextPayload(payload: ContextPayload, replaceMessages = true) {
     setCurrentUser(payload.currentUser || "owner");
+    setProjects(payload.projects ?? []);
+    setProjectId(payload.session?.projectId ?? payload.selectedProjectId ?? null);
     setSessionId(payload.session?.id ?? null);
     setSessionTitle(payload.session?.title ?? "새 작업");
     setSessionOwner(payload.session?.ownerEmail ?? payload.currentUser ?? "owner");
@@ -413,13 +458,19 @@ export default function Home() {
     if (replaceMessages) setMessages(payload.messages ?? []);
     setTeamMembers(payload.members ?? []);
     setTeamHandoffs(payload.handoffs ?? []);
+    setModelHandoffs(payload.modelHandoffs ?? []);
     setRecentSessions(payload.recentSessions ?? []);
+    const selected = (payload.projects ?? []).find((project) => project.id === (payload.session?.projectId ?? payload.selectedProjectId));
+    if (selected) setModelPreference(selected.modelPreference);
   }
 
-  async function loadWorkContext(targetSessionId?: string) {
+  async function loadWorkContext(targetSessionId?: string, targetProjectId?: string | null) {
     setContextLoading(true);
     try {
-      const query = targetSessionId ? `?sessionId=${encodeURIComponent(targetSessionId)}` : "";
+      const params = new URLSearchParams();
+      if (targetSessionId) params.set("sessionId", targetSessionId);
+      else if (targetProjectId) params.set("projectId", targetProjectId);
+      const query = params.size ? `?${params.toString()}` : "";
       const response = await fetch(`/api/context${query}`, { cache: "no-store" });
       if (!response.ok) throw new Error("context unavailable");
       applyContextPayload(await response.json() as ContextPayload);
@@ -576,6 +627,175 @@ export default function Home() {
     }
   }
 
+  function formForProject(project?: WorkspaceProject | null) {
+    return project ? {
+      name: project.name,
+      description: project.description,
+      agentId: project.agentId ?? "",
+      rootPath: project.rootPath,
+      instructions: project.instructions,
+      modelPreference: project.modelPreference,
+      fileAccess: project.fileAccess,
+      commandAccess: project.commandAccess,
+    } : { name: "", description: "", agentId: localAgents.find((agent) => agent.online)?.id ?? "", rootPath: ".", instructions: "", modelPreference: "latest" as ModelPreference, fileAccess: "read-write" as const, commandAccess: "approval" as const };
+  }
+
+  async function loadProjectDetails(targetProjectId: string) {
+    setProjectBusy(true);
+    try {
+      const response = await fetch(`/api/projects?projectId=${encodeURIComponent(targetProjectId)}`, { cache: "no-store" });
+      const payload = await response.json() as { projects?: WorkspaceProject[]; project?: WorkspaceProject; agents?: LocalAgent[]; activities?: ProjectActivity[]; error?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 불러오지 못했어요.");
+      setProjects(payload.projects ?? []);
+      setLocalAgents(payload.agents ?? []);
+      setProjectActivities(payload.activities ?? []);
+      setProjectEditingId(payload.project.id);
+      setProjectForm(formForProject(payload.project));
+    } catch (error) {
+      setProjectNote(error instanceof Error ? error.message : "프로젝트를 불러오지 못했어요.");
+    } finally {
+      setProjectBusy(false);
+    }
+  }
+
+  function openProjectWorkspace(targetProjectId: string | null = projectId, tab: "overview" | "files" | "changes" = "overview") {
+    setProjectOpen(true);
+    setProjectTab(tab);
+    setMobileMenu(false);
+    setProjectFile(null);
+    setProjectFileContent("");
+    setProjectSearchResults([]);
+    if (targetProjectId) void loadProjectDetails(targetProjectId);
+    else {
+      setProjectEditingId(null);
+      setProjectForm(formForProject(null));
+      setProjectActivities([]);
+      void loadLocalAgents();
+    }
+  }
+
+  async function saveProject(event: FormEvent) {
+    event.preventDefault();
+    if (!projectForm.name.trim() || projectBusy) return;
+    setProjectBusy(true);
+    try {
+      const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: projectEditingId ? "update" : "create", projectId: projectEditingId, ...projectForm }),
+      });
+      const payload = await response.json() as { project?: WorkspaceProject; error?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 저장하지 못했어요.");
+      setProjectEditingId(payload.project.id);
+      setProjectId(payload.project.id);
+      setProjectForm(formForProject(payload.project));
+      setProjects((items) => [payload.project!, ...items.filter((item) => item.id !== payload.project!.id)]);
+      setModelPreference(payload.project.modelPreference);
+      setProjectNote("프로젝트 설정을 저장했어요. 이제 이 프로젝트의 대화와 파일 작업이 한곳에 모입니다.");
+      await loadWorkContext(undefined, payload.project.id);
+    } catch (error) {
+      setProjectNote(error instanceof Error ? error.message : "프로젝트를 저장하지 못했어요.");
+    } finally {
+      setProjectBusy(false);
+    }
+  }
+
+  async function archiveProject() {
+    if (!projectEditingId || projectBusy) return;
+    setProjectBusy(true);
+    try {
+      const response = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "archive", projectId: projectEditingId }) });
+      if (!response.ok) throw new Error("프로젝트를 보관하지 못했어요.");
+      setProjects((items) => items.filter((item) => item.id !== projectEditingId));
+      if (projectId === projectEditingId) setProjectId(null);
+      setProjectEditingId(null);
+      setProjectForm(formForProject(null));
+      setProjectNote("프로젝트를 보관했어요. 대화와 실행 기록은 삭제하지 않았습니다.");
+    } catch (error) {
+      setProjectNote(error instanceof Error ? error.message : "프로젝트를 보관하지 못했어요.");
+    } finally {
+      setProjectBusy(false);
+    }
+  }
+
+  async function projectFileRequest(action: "list" | "read" | "search" | "diff" | "write", input: Record<string, unknown> = {}) {
+    if (!projectEditingId) throw new Error("프로젝트를 먼저 선택해 주세요.");
+    const response = await fetch("/api/projects/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: projectEditingId, action, ...input }) });
+    const payload = await response.json() as { output?: unknown; job?: { status?: string; stderr?: string }; error?: string };
+    if (!response.ok && response.status !== 202) throw new Error(payload.error || payload.job?.stderr || "로컬 파일 작업을 처리하지 못했어요.");
+    if (response.status === 202) setProjectNote("로컬 컴퓨터에서 작업 중입니다. 잠시 뒤 다시 확인해 주세요.");
+    return payload.output;
+  }
+
+  async function loadProjectFiles() {
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("list", { path: ".", maxDepth: 6 }) as { files?: ProjectFile[] } | null;
+      setProjectFiles(output?.files ?? []);
+      setProjectNote(`${output?.files?.length ?? 0}개 파일과 폴더를 안전 범위 안에서 불러왔어요.`);
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "파일 목록을 불러오지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  async function openProjectFile(path: string) {
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("read", { path }) as ProjectDocument | null;
+      if (!output?.path) throw new Error("파일 내용을 받지 못했어요.");
+      setProjectFile(output); setProjectFileContent(output.content); setProjectFilePath(output.path);
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "파일을 열지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  function newProjectFile() {
+    const path = projectFilePath.trim();
+    if (!path) { setProjectNote("새 파일의 프로젝트 기준 경로를 먼저 입력해 주세요."); return; }
+    setProjectFile({ path, content: "", hash: "", size: 0, modifiedAt: "" });
+    setProjectFileContent("");
+  }
+
+  async function saveProjectFile() {
+    if (!projectFile || projectBusy) return;
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("write", { path: projectFile.path, content: projectFileContent, expectedHash: projectFile.hash || undefined, confirmed: true }) as { path?: string; hash?: string } | null;
+      setProjectFile((current) => current ? { ...current, content: projectFileContent, hash: output?.hash ?? current.hash, size: new TextEncoder().encode(projectFileContent).length } : current);
+      setProjectNote(`${output?.path ?? projectFile.path} 저장을 완료했어요. 변경 기록에도 남겼습니다.`);
+      await loadProjectFiles();
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "파일을 저장하지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  async function searchProjectFiles(event: FormEvent) {
+    event.preventDefault();
+    if (!projectSearchQuery.trim()) return;
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("search", { query: projectSearchQuery, maxResults: 60 }) as { matches?: ProjectSearchMatch[] } | null;
+      setProjectSearchResults(output?.matches ?? []);
+      setProjectNote(`${output?.matches?.length ?? 0}개 검색 결과를 찾았어요.`);
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "프로젝트 검색을 마치지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  async function loadProjectChanges() {
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("diff") as { status?: string; diff?: string; staged?: string } | null;
+      setProjectDiff({ status: output?.status ?? "", diff: output?.diff ?? "", staged: output?.staged ?? "" });
+      await loadProjectDetails(projectEditingId!);
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "변경 내역을 불러오지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  async function selectProject(targetProjectId: string) {
+    const project = projects.find((item) => item.id === targetProjectId);
+    setProjectId(targetProjectId);
+    if (project) setModelPreference(project.modelPreference);
+    await loadWorkContext(undefined, targetProjectId);
+    setProjectOpen(false);
+  }
+
   function openMcpHub() {
     setMcpOpen(true);
     setMobileMenu(false);
@@ -656,13 +876,18 @@ export default function Home() {
   }
 
   const routingOrder = useMemo(() => {
-    if (modelPreference === "claude") return { primary: registryStatus?.models.find((model) => model.provider === "anthropic")?.name ?? "Claude Fable 5", backup: "GPT-5.6" };
-    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "anthropic") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "openai")?.name ?? "GPT" };
-    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "openai") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "anthropic")?.name ?? "Claude" };
-    return { primary: "GPT-5.6", backup: "Claude Sonnet 5" };
+    const gemini = registryStatus?.models.find((model) => model.provider === "google")?.name ?? "Gemini 3.6 Flash";
+    if (modelPreference === "gemini") return { primary: gemini, backup: registryStatus?.models.find((model) => model.provider === "openai")?.name ?? "GPT-5.6" };
+    if (modelPreference === "claude") return { primary: registryStatus?.models.find((model) => model.provider === "anthropic")?.name ?? "Claude Fable 5", backup: gemini };
+    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "anthropic") return { primary: registryStatus.latestPrimary.model, backup: gemini };
+    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "google") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "openai")?.name ?? "GPT" };
+    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "openai") return { primary: registryStatus.latestPrimary.model, backup: gemini };
+    return { primary: "GPT-5.6", backup: gemini };
   }, [modelPreference, registryStatus]);
 
-  const preferenceLabel = modelPreference === "latest" ? "최신 우선" : modelPreference === "gpt" ? "GPT 우선" : "Claude 우선";
+  const preferenceLabel = modelPreference === "latest" ? "최신 우선" : modelPreference === "gpt" ? "GPT 우선" : modelPreference === "claude" ? "Claude 우선" : "Gemini 우선";
+  const activeProject = projects.find((project) => project.id === projectId) ?? null;
+  const visibleRecentSessions = recentSessions.filter((session) => activeProject ? session.projectId === activeProject.id : !session.projectId);
 
   const selectedTeam = useMemo(() => {
     const text = prompt.toLowerCase();
@@ -700,7 +925,7 @@ export default function Home() {
 
   function assistantGuidance(payload: AssistantPayload) {
     if (payload.code === "HIGGSFIELD_MCP_AUTH_REQUIRED") return "이미지·영상 생성 MCP를 연결하면 창작 요청도 자동 실행할 수 있어요.";
-    if (payload.code === "PROVIDER_KEY_REQUIRED") return "오케스트레이터는 준비됐어요. OpenAI, Anthropic 또는 Perplexity API 키를 연결하면 실제 작업을 시작합니다.";
+    if (payload.code === "PROVIDER_KEY_REQUIRED") return "오케스트레이터는 준비됐어요. OpenAI, Anthropic, Gemini 또는 Perplexity API 키를 연결하면 실제 작업을 시작합니다.";
     if (payload.code === "BUDGET_EXHAUSTED") return "이번 달 공급사 원가 예산에 도달했어요. 예산을 조정한 뒤 다시 시도해 주세요.";
     return payload.error ?? "연결된 모델이나 도구가 잠시 응답하지 않았어요.";
   }
@@ -709,10 +934,11 @@ export default function Home() {
     const trace = payload.orchestration?.trace ?? [];
     if (payload.context) {
       setSessionId(payload.context.sessionId);
+      setProjectId(payload.context.projectId);
       setSessionTitle(payload.context.title);
       setLastContextProvider(payload.context.lastProvider);
       setRecentSessions((items) => [
-        { ...items.find((item) => item.id === payload.context!.sessionId), id: payload.context!.sessionId, title: payload.context!.title, lastProvider: payload.context!.lastProvider },
+        { ...items.find((item) => item.id === payload.context!.sessionId), id: payload.context!.sessionId, projectId: payload.context!.projectId, title: payload.context!.title, lastProvider: payload.context!.lastProvider },
         ...items.filter((item) => item.id !== payload.context!.sessionId),
       ].slice(0, 8));
     }
@@ -750,7 +976,7 @@ export default function Home() {
     setPrompt("");
     setIsWorking(true);
     try {
-      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference, sessionId }) });
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference, sessionId, projectId }) });
       const payload = await response.json() as AssistantPayload;
       if (!response.ok) {
         setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "연결 설정 필요" }]);
@@ -906,14 +1132,15 @@ export default function Home() {
     return { left: `${position.x}%`, top: `${position.y}%`, zIndex: Math.round(2 + position.y / 10) };
   }
 
-  async function newChat() {
+  async function newChat(targetProjectId: string | null = projectId) {
     setMessages([]);
     setPrompt("");
     setMobileMenu(false);
     setSessionTitle("새 작업");
     setLastContextProvider(null);
+    setProjectId(targetProjectId);
     try {
-      const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "new" }) });
+      const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "new", projectId: targetProjectId }) });
       if (!response.ok) throw new Error("new context unavailable");
       applyContextPayload(await response.json() as ContextPayload);
     } catch {
@@ -931,10 +1158,11 @@ export default function Home() {
           <button className="sidebar-close" onClick={() => setMobileMenu(false)} aria-label="메뉴 닫기">×</button>
         </div>
 
-        <button className="new-chat" onClick={() => void newChat()}><span>＋</span> 새 작업</button>
+        <button className="new-chat" onClick={() => void newChat()}><span>＋</span> {activeProject ? `${activeProject.name} 새 대화` : "새 대화"}</button>
 
         <nav className="sidebar-nav" aria-label="주요 메뉴">
           <button className="active" onClick={() => setMobileMenu(false)}><span>○</span> 대화</button>
+          <button onClick={() => openProjectWorkspace()}><span>▦</span> 프로젝트</button>
           <button onClick={() => { setGardenOpen(true); setMobileMenu(false); }}><span>♧</span> 테라코타 가든</button>
           <button onClick={openMcpHub}><span>⌁</span> MCP 연결</button>
           <button onClick={openLocalAgent}><span>›_</span> 로컬 터미널</button>
@@ -942,11 +1170,19 @@ export default function Home() {
           <button onClick={() => { setSettingsOpen(true); setMobileMenu(false); }}><span>⌘</span> 모델 및 구독</button>
         </nav>
 
+        <div className="project-sidebar">
+          <div><p>프로젝트</p><button onClick={() => openProjectWorkspace(null)} aria-label="새 프로젝트">＋</button></div>
+          <button className={!activeProject ? "active" : ""} onClick={() => void newChat(null)}><i style={{ background: "#b8b8b1" }} />일반 대화</button>
+          {projects.slice(0, 6).map((project) => (
+            <button className={project.id === projectId ? "active" : ""} key={project.id} onClick={() => void selectProject(project.id)}><i style={{ background: project.color }} />{project.name}<small>{project.agentId ? "local" : "chat"}</small></button>
+          ))}
+        </div>
+
         <div className="recents">
-          <p>최근 작업</p>
-          {recentSessions.length ? recentSessions.map((session) => (
+          <p>{activeProject ? `${activeProject.name} 대화` : "일반 대화"}</p>
+          {visibleRecentSessions.length ? visibleRecentSessions.map((session) => (
             <button className={session.id === sessionId ? "active" : ""} key={session.id} onClick={() => void loadWorkContext(session.id)}>{session.title}{session.role && session.role !== "owner" ? " · 공유됨" : ""}</button>
-          )) : <small>{contextLoading ? "기억을 불러오는 중…" : "아직 저장된 작업이 없어요."}</small>}
+          )) : <small>{contextLoading ? "기억을 불러오는 중…" : "이 프로젝트에 아직 대화가 없어요."}</small>}
         </div>
 
         <div className="sidebar-account">
@@ -964,7 +1200,8 @@ export default function Home() {
           <button className="model-switch" onClick={() => setSettingsOpen(true)}>
             Terracotta Auto · {preferenceLabel} <span>⌄</span>
           </button>
-          <span className="private-state"><i /> GPT ↔ Claude 공용 기억</span>
+          <button className={`project-scope ${activeProject ? "active" : ""}`} onClick={() => openProjectWorkspace(activeProject?.id ?? null)}><i style={{ background: activeProject?.color ?? "#b8b8b1" }} />{activeProject?.name ?? "일반 대화"}<span>⌄</span></button>
+          <span className="private-state"><i /> GPT · Claude · Gemini 공용 기억</span>
         </header>
 
         <div className={`conversation ${messages.length ? "has-messages" : ""}`}>
@@ -1022,17 +1259,20 @@ export default function Home() {
           <div className="context-bridge" aria-label="모델 공용 작업 기억">
             <div className="context-bridge-copy">
               <i />
-              <span><b>{sessionTitle}</b><small>{pendingTeamHandoff
+              <span><b>{activeProject ? `${activeProject.name} / ${sessionTitle}` : sessionTitle}</b><small>{pendingTeamHandoff
                 ? `${pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요`
                 : teamMembers.length > 1
                   ? `팀 작업 · ${teamMembers.length}명 · ${sessionRole === "viewer" ? "보기 전용" : "편집 가능"}`
                   : lastContextProvider
-                    ? `${lastContextProvider === "openai" ? "GPT" : lastContextProvider === "anthropic" ? "Claude" : "Perplexity"}에서 이어갈 준비됨`
-                    : "GPT와 Claude가 같은 작업 기록을 사용해요"}</small></span>
+                    ? `${lastContextProvider === "openai" ? "GPT" : lastContextProvider === "anthropic" ? "Claude" : lastContextProvider === "google" ? "Gemini" : "Perplexity"}에서 이어갈 준비됨`
+                    : modelHandoffs.length
+                      ? `모델 컨텍스트 인계 ${modelHandoffs.length}회 · 같은 프로젝트 기억 사용`
+                      : "GPT, Claude, Gemini가 같은 작업 기록을 사용해요"}</small></span>
             </div>
             <div className="context-bridge-actions">
               <button type="button" disabled={!canEditSession} className={modelPreference === "gpt" ? "active" : ""} onClick={() => setModelPreference("gpt")}>GPT로 이어하기</button>
               <button type="button" disabled={!canEditSession} className={modelPreference === "claude" ? "active" : ""} onClick={() => setModelPreference("claude")}>Claude로 이어하기</button>
+              <button type="button" disabled={!canEditSession} className={modelPreference === "gemini" ? "active" : ""} onClick={() => setModelPreference("gemini")}>Gemini로 이어하기</button>
               <button type="button" className={pendingTeamHandoff ? "attention" : ""} onClick={() => setTeamOpen(true)}>팀 공유{teamMembers.length > 1 ? ` ${teamMembers.length}` : ""}</button>
               <button type="button" onClick={() => void newChat()}>새 작업</button>
             </div>
@@ -1049,7 +1289,7 @@ export default function Home() {
             />
             <div className="composer-actions">
               <div>
-                <button type="button" aria-label="파일 첨부">＋</button>
+                <button type="button" aria-label="프로젝트 파일" onClick={() => openProjectWorkspace(activeProject?.id ?? null, activeProject ? "files" : "overview")}>＋</button>
                 <button type="button" aria-label="웹 검색">◎</button>
               </div>
               <span>{selectedTeam}</span>
@@ -1088,7 +1328,7 @@ export default function Home() {
         <div className="overlay" role="presentation" onMouseDown={() => setTeamOpen(false)}>
           <section className="dialog team-dialog" role="dialog" aria-modal="true" aria-label="팀 작업 공유" onMouseDown={(event) => event.stopPropagation()}>
             <button className="dialog-close" onClick={() => setTeamOpen(false)} aria-label="닫기">×</button>
-            <header><p>Team handoff</p><h2>같은 작업을 함께 키우기</h2><span>팀원도 같은 GPT·Claude 기록과 도구 결과에서 바로 이어갈 수 있어요.</span></header>
+            <header><p>Team handoff</p><h2>같은 작업을 함께 키우기</h2><span>팀원도 같은 GPT·Claude·Gemini 기록과 도구 결과에서 바로 이어갈 수 있어요.</span></header>
 
             {pendingTeamHandoff && (
               <section className="incoming-handoff">
@@ -1334,6 +1574,85 @@ export default function Home() {
         </div>
       )}
 
+      {projectOpen && (
+        <div className="overlay" role="presentation" onMouseDown={() => setProjectOpen(false)}>
+          <section className="dialog project-dialog" role="dialog" aria-modal="true" aria-label="프로젝트 워크스페이스" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="dialog-close" onClick={() => setProjectOpen(false)} aria-label="닫기">×</button>
+            <header><p>Terracotta Projects</p><h2>프로젝트별로 기억하고, 파일까지 작업</h2><span>대화·모델 인계·프로젝트 지침·로컬 파일·실행 기록을 한 범위로 묶습니다.</span></header>
+
+            <div className="project-layout">
+              <aside className="project-list-panel">
+                <button className={!projectEditingId ? "active create" : "create"} type="button" onClick={() => { setProjectEditingId(null); setProjectForm(formForProject(null)); setProjectTab("overview"); }}>＋ 새 프로젝트</button>
+                {projects.map((project) => (
+                  <button className={projectEditingId === project.id ? "active" : ""} type="button" key={project.id} onClick={() => void loadProjectDetails(project.id)}>
+                    <i style={{ background: project.color }} /><span><b>{project.name}</b><small>{project.agentId ? `${project.rootPath} · 로컬 연결` : "대화 전용"}</small></span>
+                  </button>
+                ))}
+              </aside>
+
+              <div className="project-main">
+                {projectEditingId && (
+                  <div className="project-tabs" role="tablist" aria-label="프로젝트 도구">
+                    <button role="tab" aria-selected={projectTab === "overview"} className={projectTab === "overview" ? "active" : ""} onClick={() => setProjectTab("overview")}>개요</button>
+                    <button role="tab" aria-selected={projectTab === "files"} className={projectTab === "files" ? "active" : ""} onClick={() => { setProjectTab("files"); void loadProjectFiles(); }}>파일</button>
+                    <button role="tab" aria-selected={projectTab === "changes"} className={projectTab === "changes" ? "active" : ""} onClick={() => { setProjectTab("changes"); void loadProjectChanges(); }}>변경 내역</button>
+                    <button type="button" className="project-use" onClick={() => void selectProject(projectEditingId)}>이 프로젝트에서 대화</button>
+                  </div>
+                )}
+
+                {projectTab === "overview" && (
+                  <form className="project-form" onSubmit={saveProject}>
+                    <div className="project-form-heading"><div><b>{projectEditingId ? "프로젝트 설정" : "새 프로젝트 만들기"}</b><small>연결 범위는 언제든 바꿀 수 있어요.</small></div>{projectEditingId && <button type="button" onClick={() => void archiveProject()}>보관</button>}</div>
+                    <label><span>이름</span><input value={projectForm.name} onChange={(event) => setProjectForm((value) => ({ ...value, name: event.target.value }))} placeholder="예: Terracotta 앱" required maxLength={80} /></label>
+                    <label><span>설명</span><input value={projectForm.description} onChange={(event) => setProjectForm((value) => ({ ...value, description: event.target.value }))} placeholder="이 프로젝트에서 달성할 목표" maxLength={1200} /></label>
+                    <div className="project-form-grid">
+                      <label><span>연결 컴퓨터</span><select value={projectForm.agentId} onChange={(event) => setProjectForm((value) => ({ ...value, agentId: event.target.value }))}><option value="">대화만 사용</option>{localAgents.map((agent) => <option value={agent.id} key={agent.id}>{agent.name}{agent.online ? " · 온라인" : " · 오프라인"}</option>)}</select></label>
+                      <label><span>프로젝트 폴더</span><input value={projectForm.rootPath} onChange={(event) => setProjectForm((value) => ({ ...value, rootPath: event.target.value }))} placeholder=". 또는 apps/web" /></label>
+                      <label><span>기본 모델</span><select value={projectForm.modelPreference} onChange={(event) => setProjectForm((value) => ({ ...value, modelPreference: event.target.value as ModelPreference }))}><option value="latest">최신 모델 자동</option><option value="gpt">GPT 우선</option><option value="claude">Claude 우선</option><option value="gemini">Gemini 우선</option></select></label>
+                      <label><span>파일 권한</span><select value={projectForm.fileAccess} onChange={(event) => setProjectForm((value) => ({ ...value, fileAccess: event.target.value as "read-only" | "read-write" }))}><option value="read-write">읽기 + 승인 후 쓰기</option><option value="read-only">읽기 전용</option></select></label>
+                      <label><span>터미널 권한</span><select value={projectForm.commandAccess} onChange={(event) => setProjectForm((value) => ({ ...value, commandAccess: event.target.value as "disabled" | "approval" }))}><option value="approval">승인 후 실행</option><option value="disabled">사용 안 함</option></select></label>
+                    </div>
+                    <label><span>프로젝트 지침</span><textarea value={projectForm.instructions} onChange={(event) => setProjectForm((value) => ({ ...value, instructions: event.target.value }))} placeholder="예: TypeScript를 사용하고, 기존 테스트를 통과시킨 뒤 변경 이유를 요약해줘." rows={5} maxLength={8000} /></label>
+                    <div className="project-access-note"><span>✓</span><p><b>폴더 경계를 두 번 확인합니다.</b><small>서버가 프로젝트 상대 경로를 고정하고, 로컬 에이전트가 실제 경로와 심볼릭 링크를 다시 검사합니다. 파일 저장과 명령 실행은 승인 후에만 가능합니다.</small></p></div>
+                    <button className="project-save" disabled={projectBusy}>{projectBusy ? "저장 중" : projectEditingId ? "설정 저장" : "프로젝트 만들기"}</button>
+                  </form>
+                )}
+
+                {projectTab === "files" && projectEditingId && (
+                  <section className="project-files">
+                    <div className="project-file-toolbar">
+                      <form onSubmit={searchProjectFiles}><input value={projectSearchQuery} onChange={(event) => setProjectSearchQuery(event.target.value)} placeholder="프로젝트 안에서 검색" aria-label="프로젝트 파일 검색" /><button disabled={projectBusy}>검색</button></form>
+                      <button type="button" onClick={() => void loadProjectFiles()} disabled={projectBusy}>파일 새로고침</button>
+                    </div>
+                    <div className="project-file-workbench">
+                      <aside>
+                        <div className="project-new-file"><input value={projectFilePath} onChange={(event) => setProjectFilePath(event.target.value)} placeholder="새 파일 경로" aria-label="새 프로젝트 파일 경로" /><button type="button" onClick={newProjectFile}>새 파일</button></div>
+                        {projectSearchResults.length > 0 && <div className="project-search-results"><b>검색 결과</b>{projectSearchResults.map((match, index) => <button type="button" key={`${match.path}-${match.line}-${index}`} onClick={() => void openProjectFile(match.path)}><span>{match.path}{match.line ? `:${match.line}` : ""}</span><small>{match.preview}</small></button>)}</div>}
+                        <div className="project-file-tree">{projectFiles.length ? projectFiles.map((file) => file.type === "file" ? <button type="button" className={projectFile?.path === file.path ? "active" : ""} key={file.path} onClick={() => void openProjectFile(file.path)}><span>·</span>{file.path}<small>{file.size < 1024 ? `${file.size} B` : `${Math.round(file.size / 1024)} KB`}</small></button> : <span key={file.path}><i />{file.path}</span>) : <small>온라인 로컬 에이전트를 연결하고 파일 새로고침을 눌러주세요.</small>}</div>
+                      </aside>
+                      <div className="project-editor">
+                        {projectFile ? <><header><div><b>{projectFile.path}</b><small>{projectFile.hash ? `${projectFile.size.toLocaleString()} bytes · SHA ${projectFile.hash.slice(0, 8)}` : "새 파일"}</small></div><button type="button" onClick={() => void saveProjectFile()} disabled={projectBusy || projectForm.fileAccess === "read-only"}>승인하고 저장</button></header><textarea value={projectFileContent} onChange={(event) => setProjectFileContent(event.target.value)} spellCheck={false} aria-label="프로젝트 파일 편집기" /></> : <div className="project-editor-empty"><b>파일을 선택하세요</b><small>모델도 같은 목록·읽기·검색 도구를 사용하고, 저장 전에는 변경 내용을 승인받습니다.</small></div>}
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {projectTab === "changes" && projectEditingId && (
+                  <section className="project-changes">
+                    <div className="project-changes-head"><div><b>Git 변경과 Terracotta 활동</b><small>모델·사용자 파일 작업이 프로젝트별로 남습니다.</small></div><button type="button" onClick={() => void loadProjectChanges()} disabled={projectBusy}>새로고침</button></div>
+                    <div className="project-git-summary"><b>git status</b><pre>{projectDiff.status || "변경 없음 또는 아직 불러오지 않음"}</pre></div>
+                    {(projectDiff.diff || projectDiff.staged) && <details open><summary>Git diff</summary><pre>{[projectDiff.diff, projectDiff.staged && `\n# staged\n${projectDiff.staged}`].filter(Boolean).join("\n")}</pre></details>}
+                    <div className="project-activity"><b>최근 활동</b>{projectActivities.length ? projectActivities.map((activity) => <article key={activity.id}><i className={activity.status} /><div><strong>{activity.action}</strong><span>{activity.path ?? "프로젝트"}</span><small>{activity.summary}</small></div><time>{new Date(activity.created_at).toLocaleString("ko-KR")}</time></article>) : <small>아직 기록된 파일 작업이 없어요.</small>}</div>
+                  </section>
+                )}
+
+                <p className="project-note">{projectNote}</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
       {localAgentOpen && (
         <div className="overlay" role="presentation" onMouseDown={() => setLocalAgentOpen(false)}>
           <section className="dialog local-agent-dialog" role="dialog" aria-modal="true" aria-label="로컬 터미널 연결" onMouseDown={(event) => event.stopPropagation()}>
@@ -1488,7 +1807,7 @@ export default function Home() {
         <div className="overlay" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
           <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-label="모델 및 구독" onMouseDown={(event) => event.stopPropagation()}>
             <button className="dialog-close" onClick={() => setSettingsOpen(false)} aria-label="닫기">×</button>
-            <header><p>Model router · 2026.07</p><h2>Terracotta Auto</h2><span>작업에 맞는 모델을 고르고, GPT와 Claude의 우선순위는 내가 정합니다.</span></header>
+            <header><p>Model router · 2026.07</p><h2>Terracotta Auto</h2><span>작업에 맞는 모델을 고르고, GPT·Claude·Gemini의 우선순위는 내가 정합니다.</span></header>
 
             <button className="model-lab-entry" type="button" onClick={openModelLab}><span>◫</span><div><b>모델 연구소 열기</b><small>최신 모델의 장단점, 아레나 순위와 작업별 평가를 비교하세요.</small></div><em>비교하기 →</em></button>
 
@@ -1507,11 +1826,11 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <p className="router-note"><i /> 최신 우선은 OpenAI와 Anthropic의 공식 모델 생성 시각을 비교해 자동 전환합니다. 키가 연결되기 전에는 검증된 기본 목록을 사용합니다.</p>
+              <p className="router-note"><i /> 최신 우선은 GPT와 Claude의 공식 최신 모델을 비교하고 Gemini를 다음 경로로 둡니다. Gemini 우선을 직접 선택할 수도 있어요.</p>
             </section>
 
             <section className="settings-section" aria-labelledby="models-title">
-              <div className="settings-heading"><div><h3 id="models-title">연결 모델</h3><p>하나의 작업 안에서도 필요한 모델만 조합합니다.</p></div><span>4개 공급사 · 5개 핵심 모델</span></div>
+              <div className="settings-heading"><div><h3 id="models-title">연결 모델</h3><p>하나의 작업 안에서도 필요한 모델만 조합합니다.</p></div><span>5개 공급사 · 6개 핵심 모델</span></div>
               <div className="simple-models">{modelCatalog.map((model) => {
                 const provider = model.provider;
                 const connection = registryStatus?.connections.find((item) => item.provider === provider);
@@ -1523,11 +1842,12 @@ export default function Home() {
             </section>
 
             <section className="settings-section pricing-section" aria-labelledby="pricing-title">
-              <div className="settings-heading"><div><h3 id="pricing-title">구독 출시 가안</h3><p>모든 플랜에서 GPT, Claude, Perplexity, Higgsfield를 사용할 수 있어요.</p></div><span>월간 · VAT 별도</span></div>
+              <div className="settings-heading"><div><h3 id="pricing-title">구독 출시 가안</h3><p>모든 플랜에서 GPT, Claude, Gemini, Perplexity, Higgsfield를 사용할 수 있어요.</p></div><span>월간 · VAT 별도</span></div>
               <div className="cost-benchmarks">
                 <span><b>GPT-5.6 Sol</b><small>$5 입력 · $30 출력 / 1M</small></span>
                 <span><b>Claude Fable 5</b><small>$10 입력 · $50 출력 / 1M</small></span>
                 <span><b>Claude Sonnet 5</b><small>$2 입력 · $10 출력 / 1M*</small></span>
+                <span><b>Gemini 3.6 Flash</b><small>$1.50 입력 · $7.50 출력 / 1M</small></span>
                 <span><b>Sonar Pro</b><small>$3 입력 · $15 출력 / 1M + 검색</small></span>
                 <span><b>Higgsfield</b><small>$9 · $49 · $129 크레딧 플랜</small></span>
               </div>
@@ -1543,7 +1863,7 @@ export default function Home() {
                 ))}
               </div>
               <p className="pricing-note">짧은 텍스트는 적게, 심층 리서치·영상·Fable 5 최고 난도 작업은 많이 차감됩니다. 소비자용 구독을 재판매하는 금액이 아니라 API·생성 크레딧, 환율 버퍼, 라우팅·개인 메모리·저장 비용을 포함한 출시 가격입니다. *Sonnet 5의 프로모션 가격은 2026년 8월 31일까지이며 이후 원가 예산에 $3/$15 단가를 반영합니다.</p>
-              <div className="pricing-sources"><span>공식 가격 확인</span><a href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer">OpenAI</a><a href="https://www.anthropic.com/news/claude-sonnet-5" target="_blank" rel="noreferrer">Anthropic</a><a href="https://docs.perplexity.ai/docs/getting-started/pricing" target="_blank" rel="noreferrer">Perplexity</a><a href="https://higgsfield.ai/pricing" target="_blank" rel="noreferrer">Higgsfield</a></div>
+              <div className="pricing-sources"><span>공식 가격 확인</span><a href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer">OpenAI</a><a href="https://www.anthropic.com/news/claude-sonnet-5" target="_blank" rel="noreferrer">Anthropic</a><a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noreferrer">Google Gemini</a><a href="https://docs.perplexity.ai/docs/getting-started/pricing" target="_blank" rel="noreferrer">Perplexity</a><a href="https://higgsfield.ai/pricing" target="_blank" rel="noreferrer">Higgsfield</a></div>
             </section>
             <button className="settings-save" onClick={() => setSettingsOpen(false)}>확인</button>
           </section>

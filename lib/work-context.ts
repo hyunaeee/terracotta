@@ -1,12 +1,14 @@
 import { ownerId } from "./mcp-hub";
 import { runtimeEnv } from "./terracotta-router";
+import { ensureWorkspaceProjects, getWorkspaceProject } from "./workspace-projects";
 
-export type ContextProvider = "openai" | "anthropic" | "perplexity";
+export type ContextProvider = "openai" | "anthropic" | "google" | "perplexity";
 export type SessionRole = "owner" | "editor" | "viewer";
 
 export type WorkSession = {
   id: string;
   owner_id: string;
+  project_id: string | null;
   title: string;
   goal: string;
   last_provider: ContextProvider | null;
@@ -57,7 +59,7 @@ export type TeamHandoff = {
 };
 
 const workContextSchema = [
-  `CREATE TABLE IF NOT EXISTS work_sessions (id TEXT PRIMARY KEY NOT NULL, owner_id TEXT NOT NULL, title TEXT NOT NULL, goal TEXT DEFAULT '' NOT NULL, last_provider TEXT, last_model_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS work_sessions (id TEXT PRIMARY KEY NOT NULL, owner_id TEXT NOT NULL, project_id TEXT, title TEXT NOT NULL, goal TEXT DEFAULT '' NOT NULL, last_provider TEXT, last_model_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS work_sessions_owner_idx ON work_sessions (owner_id, updated_at)`,
   `CREATE TABLE IF NOT EXISTS work_turns (id TEXT PRIMARY KEY NOT NULL, session_id TEXT NOT NULL, owner_id TEXT NOT NULL, role TEXT NOT NULL, provider TEXT, model_id TEXT, content TEXT NOT NULL, trace_json TEXT DEFAULT '[]' NOT NULL, run_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS work_turns_session_idx ON work_turns (session_id, owner_id, created_at)`,
@@ -86,6 +88,7 @@ function titleFromPrompt(prompt: string) {
 function providerLabel(provider: ContextProvider) {
   if (provider === "openai") return "GPT";
   if (provider === "anthropic") return "Claude";
+  if (provider === "google") return "Gemini";
   return "Perplexity";
 }
 
@@ -108,15 +111,21 @@ function assertCanEdit(session: WorkSessionAccess) {
 }
 
 export async function ensureWorkContext(db = runtimeEnv().DB) {
+  await ensureWorkspaceProjects();
   await db.batch(workContextSchema.map((statement) => db.prepare(statement)));
+  const columns = await db.prepare("PRAGMA table_info(work_sessions)").all<{ name: string }>();
+  if (!(columns.results ?? []).some((column) => column.name === "project_id")) await db.prepare("ALTER TABLE work_sessions ADD COLUMN project_id TEXT").run();
 }
 
-export async function createWorkSession(request: Request, title = "새 작업"): Promise<WorkSessionAccess> {
+export async function createWorkSession(request: Request, title = "새 작업", projectId?: string | null): Promise<WorkSessionAccess> {
   const db = runtimeEnv().DB;
   await ensureWorkContext(db);
+  const project = projectId ? await getWorkspaceProject(request, projectId) : null;
+  if (projectId && !project) throw missingError();
   const session: WorkSessionAccess = {
     id: crypto.randomUUID(),
     owner_id: ownerId(request),
+    project_id: project?.id ?? null,
     title: compact(title, 60) || "새 작업",
     goal: "",
     last_provider: null,
@@ -125,18 +134,22 @@ export async function createWorkSession(request: Request, title = "새 작업"):
     updated_at: new Date().toISOString(),
     access_role: "owner",
   };
-  await db.prepare("INSERT INTO work_sessions (id, owner_id, title, goal) VALUES (?, ?, ?, '')")
-    .bind(session.id, session.owner_id, session.title).run();
+  await db.prepare("INSERT INTO work_sessions (id, owner_id, project_id, title, goal) VALUES (?, ?, ?, ?, '')")
+    .bind(session.id, session.owner_id, session.project_id, session.title).run();
   return session;
 }
 
-async function findSession(request: Request, sessionId?: string | null): Promise<WorkSessionAccess | null> {
+async function findSession(request: Request, sessionId?: string | null, projectId?: string | null): Promise<WorkSessionAccess | null> {
   const db = runtimeEnv().DB;
   const actor = ownerId(request);
   const projection = `SELECT s.*, CASE WHEN s.owner_id=? THEN 'owner' ELSE (SELECT m.role FROM work_session_members m WHERE m.session_id=s.id AND m.member_email=? LIMIT 1) END AS access_role FROM work_sessions s`;
   if (sessionId) {
     return db.prepare(`${projection} WHERE s.id=? AND (s.owner_id=? OR EXISTS (SELECT 1 FROM work_session_members m WHERE m.session_id=s.id AND m.member_email=?))`)
       .bind(actor, actor, sessionId, actor, actor).first<WorkSessionAccess>();
+  }
+  if (projectId) {
+    return db.prepare(`${projection} WHERE s.project_id=? AND (s.owner_id=? OR EXISTS (SELECT 1 FROM work_session_members m WHERE m.session_id=s.id AND m.member_email=?)) ORDER BY s.updated_at DESC LIMIT 1`)
+      .bind(actor, actor, projectId, actor, actor).first<WorkSessionAccess>();
   }
   return db.prepare(`${projection} WHERE s.owner_id=? OR EXISTS (SELECT 1 FROM work_session_members m WHERE m.session_id=s.id AND m.member_email=?) ORDER BY s.updated_at DESC LIMIT 1`)
     .bind(actor, actor, actor, actor).first<WorkSessionAccess>();
@@ -166,13 +179,13 @@ function contextWindow(turns: WorkTurn[], maxChars = 48_000) {
   return selected;
 }
 
-export async function prepareWorkSession(request: Request, sessionId: string | null | undefined, prompt: string) {
+export async function prepareWorkSession(request: Request, sessionId: string | null | undefined, prompt: string, projectId?: string | null) {
   const db = runtimeEnv().DB;
   await ensureWorkContext(db);
-  let session = await findSession(request, sessionId);
+  let session = await findSession(request, sessionId, sessionId ? null : projectId);
   if (!session) {
     if (sessionId && !sessionId.startsWith("new-")) throw missingError();
-    session = await createWorkSession(request, titleFromPrompt(prompt));
+    session = await createWorkSession(request, titleFromPrompt(prompt), projectId);
   }
   assertCanEdit(session);
   if (!session.goal) {
@@ -227,7 +240,7 @@ export async function sessionForRun(request: Request, runId: string) {
   return session;
 }
 
-export function buildProviderHistory(provider: "openai" | "anthropic", turns: WorkTurn[], prompt: string) {
+export function buildProviderHistory(provider: "openai" | "anthropic" | "google", turns: WorkTurn[], prompt: string, projectPacket = "") {
   const messages = turns.map((turn) => {
     let content = turn.content;
     if (turn.role === "assistant") {
@@ -240,8 +253,18 @@ export function buildProviderHistory(provider: "openai" | "anthropic", turns: Wo
     const author = turn.role === "user" ? `팀원 ${turn.owner_id}` : "Terracotta";
     return { role: turn.role, content: `[${author}]\n${content}` };
   });
+  if (projectPacket) messages.unshift({ role: "user", content: `[프로젝트 설정]\n${projectPacket}` });
   messages.push({ role: "user" as const, content: `[현재 팀원]\n${prompt}` });
   if (provider === "openai") return { kind: "openai" as const, input: messages };
+  if (provider === "google") {
+    return {
+      kind: "google" as const,
+      input: [{
+        type: "user_input",
+        content: [{ type: "text", text: messages.map((message) => message.content).join("\n\n") }],
+      }],
+    };
+  }
 
   const normalized: Array<{ role: "user" | "assistant"; content: string }> = [];
   for (const message of messages) {
@@ -391,20 +414,24 @@ export async function acceptTeamHandoff(request: Request, sessionId: string, han
   if (!result.meta.changes) throw Object.assign(new Error("이어받을 작업을 찾을 수 없거나 이미 처리됐어요."), { code: "HANDOFF_NOT_FOUND", status: 404 });
 }
 
-export async function getWorkContext(request: Request, sessionId?: string | null) {
+export async function getWorkContext(request: Request, sessionId?: string | null, projectId?: string | null) {
   const db = runtimeEnv().DB;
   await ensureWorkContext(db);
   const actor = ownerId(request);
-  const session = await findSession(request, sessionId);
-  const recent = await db.prepare(`SELECT s.*, CASE WHEN s.owner_id=? THEN 'owner' ELSE (SELECT m.role FROM work_session_members m WHERE m.session_id=s.id AND m.member_email=? LIMIT 1) END AS access_role FROM work_sessions s WHERE s.owner_id=? OR EXISTS (SELECT 1 FROM work_session_members m WHERE m.session_id=s.id AND m.member_email=?) ORDER BY s.updated_at DESC LIMIT 8`)
+  const session = await findSession(request, sessionId, sessionId ? null : projectId);
+  const recent = await db.prepare(`SELECT s.*, CASE WHEN s.owner_id=? THEN 'owner' ELSE (SELECT m.role FROM work_session_members m WHERE m.session_id=s.id AND m.member_email=? LIMIT 1) END AS access_role FROM work_sessions s WHERE s.owner_id=? OR EXISTS (SELECT 1 FROM work_session_members m WHERE m.session_id=s.id AND m.member_email=?) ORDER BY s.updated_at DESC LIMIT 30`)
     .bind(actor, actor, actor, actor).all<WorkSessionAccess>();
-  if (!session) return { currentUser: actor, session: null, turns: [], members: [], handoffs: [], recentSessions: recent.results ?? [] };
+  if (!session) return { currentUser: actor, selectedProjectId: projectId ?? null, session: null, turns: [], members: [], handoffs: [], modelHandoffs: [], recentSessions: recent.results ?? [] };
+  const modelHandoffs = await db.prepare("SELECT id, from_provider, to_provider, created_at FROM context_handoffs WHERE session_id=? AND owner_id=? ORDER BY created_at DESC LIMIT 20")
+    .bind(session.id, session.owner_id).all<{ id: string; from_provider: ContextProvider; to_provider: ContextProvider; created_at: string }>();
   return {
     currentUser: actor,
+    selectedProjectId: session.project_id,
     session,
     turns: await loadTurns(session.id, 80),
     members: await listMembers(session),
     handoffs: await listTeamHandoffs(request, session),
+    modelHandoffs: modelHandoffs.results ?? [],
     recentSessions: recent.results ?? [],
   };
 }

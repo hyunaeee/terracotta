@@ -25,10 +25,11 @@ import {
   type ContextHandoff,
   type WorkSession,
 } from "./work-context";
+import { getWorkspaceProject, projectContext, type WorkspaceProject } from "./workspace-projects";
 
 type JsonSchema = Record<string, unknown>;
 type ToolRisk = "read" | "write";
-type PlannerProvider = "openai" | "anthropic";
+type PlannerProvider = "openai" | "anthropic" | "google";
 
 type RawMcpTool = {
   name?: string;
@@ -47,11 +48,13 @@ type OrchestratorTool = {
   description: string;
   inputSchema: JsonSchema;
   risk: ToolRisk;
+  projectId: string | null;
 };
 
 type OpenAiState = { kind: "openai"; input: unknown[] };
 type AnthropicState = { kind: "anthropic"; messages: unknown[] };
-type ProviderState = OpenAiState | AnthropicState;
+type GeminiState = { kind: "google"; input: unknown[] };
+type ProviderState = OpenAiState | AnthropicState | GeminiState;
 
 type ToolCall = { callId: string; alias: string; args: Record<string, unknown> };
 type ToolResult = { callId: string; output: string; isError: boolean };
@@ -81,6 +84,7 @@ export type AssistantResult = {
   orchestration: { runId: string; trace: OrchestrationTrace[]; reviewedBy?: string };
   context: {
     sessionId: string;
+    projectId: string | null;
     title: string;
     lastProvider: string;
     handoff?: { from: string; to: string; label: string };
@@ -188,10 +192,10 @@ async function recordEvent(request: Request, runId: string, event: {
     .bind(crypto.randomUUID(), runId, ownerId(request), event.type, event.provider ?? null, event.model ?? null, event.connectionId ?? null, event.tool ?? null, event.risk ?? null, event.status, event.input == null ? null : safeJson(event.input, 8_000), event.output ? compact(event.output, 1_200) : null).run();
 }
 
-async function connectedTools(request: Request) {
+async function connectedTools(request: Request, project: WorkspaceProject | null) {
   const [connections, localTools] = await Promise.all([
     listMcpConnections(request) as Promise<Array<Record<string, unknown> & { tools?: RawMcpTool[] }>>,
-    connectedLocalAgentTools(request),
+    connectedLocalAgentTools(request, project),
   ]);
   const tools: OrchestratorTool[] = [...localTools];
   const usedAliases = new Set<string>();
@@ -213,6 +217,7 @@ async function connectedTools(request: Request) {
         description: `[${String(item.name ?? item.id)}] [${risk === "read" ? "읽기 전용 · 자동 실행 가능" : "외부 변경 · 사용자 승인 필요"}] ${raw.description ?? raw.name}`,
         inputSchema: schemaFor(raw),
         risk,
+        projectId: null,
       });
     }
   }
@@ -239,6 +244,7 @@ function chooseTools(prompt: string, task: TaskKind, available: OrchestratorTool
     description: `[읽기 전용 · 자동 실행 가능] 최신 웹 정보와 출처를 조사합니다.${task === "research" ? " 이 요청은 최신 조사가 중요합니다." : ""}`,
     inputSchema: { type: "object", properties: { query: { type: "string", description: "웹에서 조사할 구체적인 질문" } }, required: ["query"], additionalProperties: false },
     risk: "read",
+    projectId: null,
   });
   return selected.slice(0, MAX_TOOLS_PER_REQUEST);
 }
@@ -249,6 +255,10 @@ function openAiTools(tools: OrchestratorTool[]) {
 
 function anthropicTools(tools: OrchestratorTool[]) {
   return tools.map((tool) => ({ name: tool.alias, description: tool.description, input_schema: tool.inputSchema }));
+}
+
+function geminiTools(tools: OrchestratorTool[]) {
+  return tools.map((tool) => ({ type: "function", name: tool.alias, description: tool.description, parameters: tool.inputSchema }));
 }
 
 function openAiText(output: Array<Record<string, unknown>>) {
@@ -285,10 +295,56 @@ async function invokeAnthropicTurn(key: string, model: string, state: AnthropicS
   return { state: { kind: "anthropic" as const, messages: [...state.messages, { role: "assistant", content }] }, calls, text, inputUnits: payload.usage?.input_tokens ?? 0, outputUnits: payload.usage?.output_tokens ?? 0 };
 }
 
+async function invokeGeminiTurn(key: string, model: string, state: GeminiState, tools: OrchestratorTool[]) {
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      store: false,
+      system_instruction: SYSTEM_PROMPT,
+      input: state.input,
+      generation_config: { max_output_tokens: 2_000 },
+      ...(tools.length ? { tools: geminiTools(tools) } : {}),
+    }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!response.ok) throw new Error(`Google Gemini orchestration failed with ${response.status}`);
+  const payload = await response.json() as {
+    steps?: Array<Record<string, unknown>>;
+    usage?: { total_input_tokens?: number; total_output_tokens?: number; total_thought_tokens?: number };
+  };
+  const steps = payload.steps ?? [];
+  const calls = steps.filter((step) => step.type === "function_call").map((step) => ({
+    callId: String(step.id ?? crypto.randomUUID()),
+    alias: String(step.name ?? ""),
+    args: typeof step.arguments === "string"
+      ? parseJson<Record<string, unknown>>(step.arguments, {})
+      : step.arguments && typeof step.arguments === "object"
+        ? step.arguments as Record<string, unknown>
+        : {},
+  }));
+  const text = steps
+    .filter((step) => step.type === "model_output")
+    .flatMap((step) => Array.isArray(step.content) ? step.content as Array<Record<string, unknown>> : [])
+    .filter((part) => part.type === "text")
+    .map((part) => String(part.text ?? ""))
+    .join("\n")
+    .trim();
+  return {
+    state: { kind: "google" as const, input: [...state.input, ...steps] },
+    calls,
+    text,
+    inputUnits: payload.usage?.total_input_tokens ?? 0,
+    outputUnits: (payload.usage?.total_output_tokens ?? 0) + (payload.usage?.total_thought_tokens ?? 0),
+  };
+}
+
 async function invokeTurn(provider: PlannerProvider, model: string, state: ProviderState, tools: OrchestratorTool[]) {
   const environment = runtimeEnv();
   if (provider === "openai" && state.kind === "openai") return invokeOpenAiTurn(environment.OPENAI_API_KEY!, model, state, tools);
   if (provider === "anthropic" && state.kind === "anthropic") return invokeAnthropicTurn(environment.ANTHROPIC_API_KEY!, model, state, tools);
+  if (provider === "google" && state.kind === "google") return invokeGeminiTurn(environment.GEMINI_API_KEY!, model, state, tools);
   throw new Error("Provider state does not match the selected model");
 }
 
@@ -296,7 +352,23 @@ function appendResults(state: ProviderState, results: ToolResult[]): ProviderSta
   if (state.kind === "openai") {
     return { kind: "openai", input: [...state.input, ...results.map((result) => ({ type: "function_call_output", call_id: result.callId, output: result.output }))] };
   }
-  return { kind: "anthropic", messages: [...state.messages, { role: "user", content: results.map((result) => ({ type: "tool_result", tool_use_id: result.callId, content: result.output, ...(result.isError ? { is_error: true } : {}) })) }] };
+  if (state.kind === "anthropic") {
+    return { kind: "anthropic", messages: [...state.messages, { role: "user", content: results.map((result) => ({ type: "tool_result", tool_use_id: result.callId, content: result.output, ...(result.isError ? { is_error: true } : {}) })) }] };
+  }
+  const names = new Map(
+    state.input
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && (item as Record<string, unknown>).type === "function_call")
+      .map((item) => [String(item.id ?? ""), String(item.name ?? "")]),
+  );
+  return {
+    kind: "google",
+    input: [...state.input, ...results.map((result) => ({
+      type: "function_result",
+      name: names.get(result.callId) ?? "",
+      call_id: result.callId,
+      result: [{ type: "text", text: result.output }],
+    }))],
+  };
 }
 
 async function executeTool(request: Request, runId: string, prompt: string, task: TaskKind, call: PendingCall, models: RegistryRow[]) {
@@ -308,7 +380,7 @@ async function executeTool(request: Request, runId: string, prompt: string, task
       costMicros = await recordUsage(runtimeEnv().DB, invocation, task, models.find((item) => item.provider === "perplexity"));
       output = safeJson({ answer: invocation.text, citations: invocation.citations ?? [] });
     } else if (call.tool.kind === "local_shell") {
-      output = safeJson(await runLocalAgentTool(request, runId, call.tool.connectionId!, call.args));
+      output = safeJson(await runLocalAgentTool(request, runId, call.tool.connectionId!, call.tool.toolName, call.args, call.tool.projectId));
     } else {
       output = safeJson(await callMcpTool(request, call.tool.connectionId!, call.tool.toolName, call.args));
     }
@@ -340,11 +412,11 @@ function shouldReview(prompt: string) {
 }
 
 async function reviewAnswer(request: Request, runId: string, prompt: string, draft: string, primary: PlannerProvider, models: RegistryRow[], task: TaskKind) {
-  const backup = models.find((item) => (item.provider === "openai" || item.provider === "anthropic") && item.provider !== primary && configured(runtimeEnv(), item.provider));
+  const backup = models.find((item) => (item.provider === "openai" || item.provider === "anthropic" || item.provider === "google") && item.provider !== primary && configured(runtimeEnv(), item.provider));
   if (!backup) return null;
   const reviewPrompt = `사용자 요청:\n${prompt}\n\n초안:\n${draft}\n\n사실 오류와 빠진 요구를 검토하고, 필요하면 고쳐서 최종 답변만 한국어로 작성하세요.`;
   const provider = backup.provider as PlannerProvider;
-  const initial: ProviderState = provider === "openai" ? { kind: "openai", input: [{ role: "user", content: reviewPrompt }] } : { kind: "anthropic", messages: [{ role: "user", content: reviewPrompt }] };
+  const initial = initialProviderState(provider, reviewPrompt);
   const turn = await invokeTurn(provider, backup.model_id, initial, []);
   const invocation: Invocation = { provider, model: backup.model_id, text: turn.text, inputUnits: turn.inputUnits, outputUnits: turn.outputUnits };
   const costMicros = await recordUsage(runtimeEnv().DB, invocation, task, backup);
@@ -352,11 +424,17 @@ async function reviewAnswer(request: Request, runId: string, prompt: string, dra
   return turn.text ? { text: turn.text, provider, model: backup.model_id, costMicros } : null;
 }
 
+function initialProviderState(provider: PlannerProvider, prompt: string): ProviderState {
+  if (provider === "openai") return { kind: "openai", input: [{ role: "user", content: prompt }] };
+  if (provider === "anthropic") return { kind: "anthropic", messages: [{ role: "user", content: prompt }] };
+  return { kind: "google", input: [{ type: "user_input", content: [{ type: "text", text: prompt }] }] };
+}
+
 async function runProviderAgent(args: {
   request: Request; runId: string; prompt: string; preference: ModelPreference; task: TaskKind; provider: PlannerProvider; model: RegistryRow; models: RegistryRow[]; tools: OrchestratorTool[]; session: WorkSession; handoff?: ContextHandoff | null; state?: ProviderState; trace?: OrchestrationTrace[]; costMicros?: number;
 }): Promise<AssistantResult> {
   const { request, runId, prompt, task, provider, model, models, tools, session, handoff } = args;
-  let state = args.state ?? (provider === "openai" ? { kind: "openai" as const, input: [{ role: "user", content: prompt }] } : { kind: "anthropic" as const, messages: [{ role: "user", content: prompt }] });
+  let state = args.state ?? initialProviderState(provider, prompt);
   let trace = args.trace ?? [
     ...(handoff ? [{ type: "handoff" as const, label: handoff.label, status: "done" as const }] : []),
     { type: "route" as const, label: `${model.display_name}가 요청과 도구를 분석`, status: "done" as const },
@@ -389,7 +467,7 @@ async function runProviderAgent(args: {
       return {
         text, provider, model: model.model_id, task, costUsd: costMicros / 1_000_000, citations: [], live: true,
         orchestration: { runId, trace, ...(reviewedBy ? { reviewedBy } : {}) },
-        context: { sessionId: session.id, title: session.title, lastProvider: provider, ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
+        context: { sessionId: session.id, projectId: session.project_id, title: session.title, lastProvider: provider, ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
       };
     }
 
@@ -397,7 +475,7 @@ async function runProviderAgent(args: {
     const remainingCalls = Math.max(0, MAX_TOOL_CALLS_PER_RUN - alreadyPlanned);
     const mapped: PendingCall[] = turn.calls.map((call, index) => {
       const tool = tools.find((candidate) => candidate.alias === call.alias);
-      const mappedCall: PendingCall = tool ? { ...call, tool } : { ...call, tool: { alias: call.alias, kind: "mcp", connectionId: null, connectionName: "알 수 없는 도구", toolName: call.alias, description: "", inputSchema: {}, risk: "write" } };
+      const mappedCall: PendingCall = tool ? { ...call, tool } : { ...call, tool: { alias: call.alias, kind: "mcp", connectionId: null, connectionName: "알 수 없는 도구", toolName: call.alias, description: "", inputSchema: {}, risk: "write", projectId: null } };
       if (index >= remainingCalls) mappedCall.result = { callId: call.callId, output: safeJson({ error: "Terracotta stopped additional tool calls at the per-request safety limit." }), isError: true };
       return mappedCall;
     });
@@ -423,7 +501,7 @@ async function runProviderAgent(args: {
         provider, model: model.model_id, task, costUsd: costMicros / 1_000_000, citations: [], live: true, approvalRequired: true,
         approval: { id: runId, summary: "외부 서비스의 데이터를 변경하는 작업입니다. 아래 내용을 확인해 주세요.", expiresAt, actions: pendingWrites.map((call) => ({ service: call.tool.connectionName, tool: call.tool.toolName, arguments: call.args })) },
         orchestration: { runId, trace },
-        context: { sessionId: session.id, title: session.title, lastProvider: provider, ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
+        context: { sessionId: session.id, projectId: session.project_id, title: session.title, lastProvider: provider, ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
       };
     }
 
@@ -438,13 +516,23 @@ async function runProviderAgent(args: {
   return {
     text, provider, model: model.model_id, task, costUsd: costMicros / 1_000_000, citations: [], live: true,
     orchestration: { runId, trace },
-    context: { sessionId: session.id, title: session.title, lastProvider: provider, ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
+    context: { sessionId: session.id, projectId: session.project_id, title: session.title, lastProvider: provider, ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
   };
 }
 
 function routingOrder(preference: ModelPreference, models: RegistryRow[]) {
   const latest = chooseLatestFrontier(models);
-  const order: PlannerProvider[] = preference === "gpt" ? ["openai", "anthropic"] : preference === "claude" ? ["anthropic", "openai"] : latest?.provider === "anthropic" ? ["anthropic", "openai"] : ["openai", "anthropic"];
+  const order: PlannerProvider[] = preference === "gpt"
+    ? ["openai", "google", "anthropic"]
+    : preference === "claude"
+      ? ["anthropic", "google", "openai"]
+      : preference === "gemini"
+        ? ["google", "openai", "anthropic"]
+        : latest?.provider === "anthropic"
+          ? ["anthropic", "google", "openai"]
+          : latest?.provider === "google"
+            ? ["google", "openai", "anthropic"]
+            : ["openai", "google", "anthropic"];
   return order.filter((provider) => configured(runtimeEnv(), provider));
 }
 
@@ -455,29 +543,31 @@ async function checkBudget() {
   if (Number(spent?.cost ?? 0) >= budget) throw Object.assign(new Error("이번 달 공급사 원가 예산에 도달했습니다."), { code: "BUDGET_EXHAUSTED", status: 402 });
 }
 
-export async function runAssistant(request: Request, prompt: string, preference: ModelPreference, sessionId?: string | null): Promise<AssistantResult> {
+export async function runAssistant(request: Request, prompt: string, preference: ModelPreference, sessionId?: string | null, projectId?: string | null): Promise<AssistantResult> {
   await syncProviderRegistry(false);
   await checkBudget();
   const task = classifyTask(prompt);
   const models = await currentModels(runtimeEnv().DB);
-  const available = await connectedTools(request);
+  const work = await prepareWorkSession(request, sessionId, prompt, projectId);
+  const project = await getWorkspaceProject(request, work.session.project_id);
+  const effectivePreference = project?.model_preference ?? preference;
+  const available = await connectedTools(request, project);
   const tools = chooseTools(prompt, task, available, configured(runtimeEnv(), "perplexity"));
   const creativeTools = tools.filter((tool) => tool.kind === "mcp" && /(image|video|higgs|media|이미지|영상|generate)/i.test(`${tool.connectionName} ${tool.toolName} ${tool.description}`));
   if (task === "creative" && !creativeTools.length) throw Object.assign(new Error("이미지·영상 생성 MCP를 먼저 연결해 주세요."), { code: "HIGGSFIELD_MCP_AUTH_REQUIRED", status: 409 });
 
-  const run = await createRun(request, prompt, preference, task);
-  const work = await prepareWorkSession(request, sessionId, prompt);
+  const run = await createRun(request, prompt, effectivePreference, task);
   await linkRunToSession(request, run.id, work.session.id);
   await appendUserTurn(request, work.session.id, prompt, run.id);
-  const order = routingOrder(preference, models);
+  const order = routingOrder(effectivePreference, models);
   const errors: string[] = [];
   for (const provider of order) {
     const model = models.find((item) => item.provider === provider);
     if (!model) continue;
     try {
       const handoff = await recordContextHandoff(request, work.session, provider, work.turns, prompt);
-      const state = buildProviderHistory(provider, work.turns, prompt);
-      return await runProviderAgent({ request, runId: run.id, prompt, preference, task, provider, model, models, tools: task === "creative" ? creativeTools : tools, session: work.session, handoff, state });
+      const state = buildProviderHistory(provider, work.turns, prompt, projectContext(project));
+      return await runProviderAgent({ request, runId: run.id, prompt, preference: effectivePreference, task, provider, model, models, tools: task === "creative" ? creativeTools : tools, session: work.session, handoff, state });
     }
     catch (error) {
       errors.push(error instanceof Error ? error.message : `${provider} failed`);
@@ -499,10 +589,10 @@ export async function runAssistant(request: Request, prompt: string, preference:
     return {
       text: invocation.text, provider: "perplexity", model: invocation.model, task, costUsd: costMicros / 1_000_000, citations: invocation.citations ?? [], live: true,
       orchestration: { runId: run.id, trace },
-      context: { sessionId: work.session.id, title: work.session.title, lastProvider: "perplexity", ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
+      context: { sessionId: work.session.id, projectId: work.session.project_id, title: work.session.title, lastProvider: "perplexity", ...(handoff ? { handoff: { from: handoff.from, to: handoff.to, label: handoff.label } } : {}) },
     };
   }
-  throw Object.assign(new Error(errors.join(" · ") || "OpenAI, Anthropic 또는 Perplexity API 키가 필요합니다."), { code: order.length ? "PROVIDER_ERROR" : "PROVIDER_KEY_REQUIRED", status: order.length ? 502 : 503 });
+  throw Object.assign(new Error(errors.join(" · ") || "OpenAI, Anthropic, Google Gemini 또는 Perplexity API 키가 필요합니다."), { code: order.length ? "PROVIDER_ERROR" : "PROVIDER_KEY_REQUIRED", status: order.length ? 502 : 503 });
 }
 
 export async function resolveApproval(request: Request, approvalId: string, decision: "approve" | "reject"): Promise<AssistantResult> {

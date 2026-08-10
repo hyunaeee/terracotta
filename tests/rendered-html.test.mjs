@@ -143,6 +143,7 @@ test("adds a sourced, live-updating model intelligence lab", async () => {
   assert.match(intelligence, /Artificial Analysis/);
   assert.match(intelligence, /Claude Fable 5/);
   assert.match(intelligence, /GPT-5\.6 Sol/);
+  assert.match(intelligence, /Gemini 3\.6 Flash/);
   assert.match(intelligence, /Perplexity Sonar Pro/);
   assert.match(intelligence, /Kimi K3/);
   assert.match(intelligence, /AbortSignal\.timeout/);
@@ -191,6 +192,52 @@ test("pairs cross-platform local terminals through an approval-only outbound age
   assert.match(caddy, /X-Auth-Request-Email>oai-authenticated-user-email/);
 });
 
+test("organizes conversations, model context, and computer files by project", async () => {
+  const [projects, filesRoute, projectRoute, context, orchestrator, agent, worker, page, css, schema, migration] = await Promise.all([
+    source("lib/workspace-projects.ts"),
+    source("app/api/projects/files/route.ts"),
+    source("app/api/projects/route.ts"),
+    source("lib/work-context.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("lib/local-agent.ts"),
+    source("public/terracotta-local-agent.mjs"),
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("db/schema.ts"),
+    source("drizzle/0007_serious_blizzard.sql"),
+  ]);
+
+  assert.match(projects, /workspace_projects/);
+  assert.match(projects, /project_file_events/);
+  assert.match(projects, /normalizeRootPath/);
+  assert.match(projects, /ProjectFileAccess/);
+  assert.match(projectRoute, /listWorkspaceProjects/);
+  assert.match(filesRoute, /WRITE_CONFIRMATION_REQUIRED/);
+  assert.match(filesRoute, /inspect_project_changes/);
+  assert.match(context, /project_id/);
+  assert.match(context, /projectPacket/);
+  assert.match(orchestrator, /projectContext/);
+  assert.match(orchestrator, /project\?\.model_preference/);
+  assert.match(agent, /list_project_files/);
+  assert.match(agent, /read_project_file/);
+  assert.match(agent, /write_project_file/);
+  assert.match(agent, /project\.file_access/);
+  assert.match(agent, /project\.command_access/);
+  assert.match(worker, /realpath/);
+  assert.match(worker, /expectedHash/);
+  assert.match(worker, /search_project_files/);
+  assert.match(worker, /inspect_project_changes/);
+  assert.match(page, /프로젝트 워크스페이스/);
+  assert.match(page, /프로젝트 안에서 검색/);
+  assert.match(page, /대화·모델 인계·프로젝트 지침/);
+  assert.match(css, /\.project-file-workbench/);
+  assert.match(css, /\.project-activity/);
+  assert.match(schema, /workspaceProjects/);
+  assert.match(schema, /projectFileEvents/);
+  assert.match(migration, /CREATE TABLE `workspace_projects`/);
+  assert.match(migration, /ALTER TABLE `work_sessions` ADD `project_id`/);
+});
+
 test("orchestrates models and MCP tools with durable write approval", async () => {
   const [orchestrator, assistantRoute, page, css, schema, migration] = await Promise.all([
     source("lib/terracotta-orchestrator.ts"),
@@ -206,6 +253,7 @@ test("orchestrates models and MCP tools with durable write approval", async () =
   assert.match(orchestrator, /callMcpTool/);
   assert.match(orchestrator, /function_call_output/);
   assert.match(orchestrator, /tool_result/);
+  assert.match(orchestrator, /function_result/);
   assert.match(orchestrator, /readOnlyHint/);
   assert.match(orchestrator, /approval_required/);
   assert.match(orchestrator, /resolveApproval/);
@@ -221,7 +269,7 @@ test("orchestrates models and MCP tools with durable write approval", async () =
   assert.match(migration, /CREATE TABLE `orchestration_events`/);
 });
 
-test("persists provider-neutral work context and hands it between GPT and Claude", async () => {
+test("persists provider-neutral work context and hands it between GPT, Claude, and Gemini", async () => {
   const [context, contextRoute, assistantRoute, orchestrator, page, css, schema, migration] = await Promise.all([
     source("lib/work-context.ts"),
     source("app/api/context/route.ts"),
@@ -238,6 +286,7 @@ test("persists provider-neutral work context and hands it between GPT and Claude
   assert.match(context, /context_handoffs/);
   assert.match(context, /context_run_links/);
   assert.match(context, /buildProviderHistory/);
+  assert.match(context, /kind: "google"/);
   assert.match(context, /Hidden reasoning is never transferred/);
   assert.match(contextRoute, /recentSessions/);
   assert.match(contextRoute, /private, no-store/);
@@ -247,7 +296,8 @@ test("persists provider-neutral work context and hands it between GPT and Claude
   assert.match(orchestrator, /provider-neutral Terracotta work session/);
   assert.match(page, /GPT로 이어하기/);
   assert.match(page, /Claude로 이어하기/);
-  assert.match(page, /GPT ↔ Claude 공용 기억/);
+  assert.match(page, /Gemini로 이어하기/);
+  assert.match(page, /GPT · Claude · Gemini 공용 기억/);
   assert.match(css, /\.context-bridge/);
   assert.match(css, /\.orchestration-trace span\.handoff/);
   assert.match(schema, /workSessions/);
@@ -256,6 +306,34 @@ test("persists provider-neutral work context and hands it between GPT and Claude
   assert.match(migration, /CREATE TABLE `work_sessions`/);
   assert.match(migration, /CREATE TABLE `work_turns`/);
   assert.match(migration, /CREATE TABLE `context_handoffs`/);
+});
+
+test("routes Gemini through the live registry, Interactions API, and Docker runtime", async () => {
+  const [router, orchestrator, registryRoute, assistantRoute, page, compose, productionCompose, runtime] = await Promise.all([
+    source("lib/terracotta-router.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("app/api/model-registry/route.ts"),
+    source("app/api/assistant/route.ts"),
+    source("app/page.tsx"),
+    source("compose.yaml"),
+    source("compose.production.yaml"),
+    source("docker/prepare-runtime-env.mjs"),
+  ]);
+
+  assert.match(router, /provider: "google"/);
+  assert.match(router, /gemini-3\.6-flash/);
+  assert.match(router, /v1beta\/models\?pageSize=1000/);
+  assert.match(router, /GEMINI_API_KEY/);
+  assert.match(orchestrator, /invokeGeminiTurn/);
+  assert.match(orchestrator, /v1beta\/interactions/);
+  assert.match(orchestrator, /total_thought_tokens/);
+  assert.match(registryRoute, /"gemini"/);
+  assert.match(assistantRoute, /"gemini"/);
+  assert.match(page, /Gemini 우선/);
+  assert.match(page, /Google Gemini/);
+  assert.match(compose, /GEMINI_API_KEY/);
+  assert.match(productionCompose, /GEMINI_API_KEY/);
+  assert.match(runtime, /GEMINI_API_KEY/);
 });
 
 test("shares work sessions with role-based team handoffs", async () => {

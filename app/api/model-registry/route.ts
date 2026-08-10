@@ -14,7 +14,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const payload = await request.json() as { preference?: ModelPreference };
-    if (!payload.preference || !["latest", "gpt", "claude"].includes(payload.preference)) return Response.json({ error: "valid preference is required" }, { status: 400 });
+    if (!payload.preference || !["latest", "gpt", "claude", "gemini"].includes(payload.preference)) return Response.json({ error: "valid preference is required" }, { status: 400 });
     await savePreference(payload.preference);
     return Response.json({ saved: true });
   } catch (error) {

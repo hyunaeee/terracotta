@@ -55,9 +55,12 @@ test("self-hosting only enables team identity headers when explicitly trusted", 
   try {
     const result = runRuntimeSetup(runtimeFile, sandbox, {
       TERRACOTTA_TRUST_AUTH_HEADERS: "true",
+      GEMINI_API_KEY: "test-gemini-key",
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.match(await readFile(runtimeFile, "utf8"), /TERRACOTTA_TRUST_AUTH_HEADERS="true"/);
+    const runtime = await readFile(runtimeFile, "utf8");
+    assert.match(runtime, /TERRACOTTA_TRUST_AUTH_HEADERS="true"/);
+    assert.match(runtime, /GEMINI_API_KEY="test-gemini-key"/);
   } finally {
     await rm(sandbox, { recursive: true, force: true });
   }

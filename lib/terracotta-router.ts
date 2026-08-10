@@ -1,13 +1,14 @@
 import { env as cloudflareEnv } from "cloudflare:workers";
 
-export type ProviderId = "openai" | "anthropic" | "perplexity" | "higgsfield";
-export type ModelPreference = "latest" | "gpt" | "claude";
+export type ProviderId = "openai" | "anthropic" | "google" | "perplexity" | "higgsfield";
+export type ModelPreference = "latest" | "gpt" | "claude" | "gemini";
 export type TaskKind = "general" | "research" | "creative";
 
 export type RuntimeEnv = {
   DB: D1Database;
   OPENAI_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
+  GEMINI_API_KEY?: string;
   PERPLEXITY_API_KEY?: string;
   HIGGSFIELD_MCP_CONNECTED?: string;
   TERRACOTTA_MONTHLY_BUDGET_USD?: string;
@@ -49,6 +50,7 @@ const seeds = [
   { provider: "openai" as const, model: "gpt-5.6", name: "GPT-5.6 Sol", rank: 560, input: 5_000_000, output: 30_000_000 },
   { provider: "anthropic" as const, model: "claude-fable-5", name: "Claude Fable 5", rank: 510, input: 10_000_000, output: 50_000_000 },
   { provider: "anthropic" as const, model: "claude-sonnet-5", name: "Claude Sonnet 5", rank: 500, input: 3_000_000, output: 15_000_000 },
+  { provider: "google" as const, model: "gemini-3.6-flash", name: "Gemini 3.6 Flash", rank: 360, input: 1_500_000, output: 7_500_000 },
   { provider: "perplexity" as const, model: "sonar-pro", name: "Perplexity Sonar Pro", rank: 100, input: 3_000_000, output: 15_000_000 },
   { provider: "higgsfield" as const, model: "higgsfield-mcp", name: "Higgsfield MCP", rank: 100, input: 0, output: 0 },
 ];
@@ -63,7 +65,7 @@ function safeError(error: unknown) {
 }
 
 function rankVersion(id: string) {
-  const match = id.match(/(?:gpt-|claude-(?:fable|sonnet|opus)-)(\d+)(?:[.-](\d+))?/i);
+  const match = id.match(/(?:gpt-|claude-(?:fable|sonnet|opus)-|gemini-)(\d+)(?:[.-](\d+))?/i);
   return match ? Number(match[1]) * 100 + Number(match[2] ?? 0) : 0;
 }
 
@@ -73,6 +75,12 @@ function isOpenAiFrontier(id: string) {
 
 function isClaudeFrontier(id: string) {
   return /^claude-(?:fable|sonnet|opus)-\d/i.test(id) && !/(haiku|instant)/i.test(id);
+}
+
+function isGeminiFrontier(id: string, methods: string[] = []) {
+  return /^gemini-\d+(?:\.\d+)*-(?:flash|pro)$/i.test(id)
+    && !/(preview|latest|lite|live|image|embedding|audio|tts)/i.test(id)
+    && (!methods.length || methods.includes("generateContent"));
 }
 
 async function ensureDatabase(db: D1Database) {
@@ -127,6 +135,44 @@ async function syncAnthropic(db: D1Database, key?: string) {
   await setSyncState(db, "anthropic", "connected", current.id, null);
 }
 
+async function syncGoogle(db: D1Database, key?: string) {
+  if (!key) return setSyncState(db, "google", "needs_key", "gemini-3.6-flash", null);
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", {
+    headers: { "x-goog-api-key": key },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`Google Gemini model registry returned ${response.status}`);
+  const payload = await response.json() as {
+    models?: Array<{
+      name?: string;
+      baseModelId?: string;
+      displayName?: string;
+      supportedGenerationMethods?: string[];
+    }>;
+  };
+  const candidates = (payload.models ?? [])
+    .map((model) => ({
+      ...model,
+      id: model.baseModelId ?? model.name?.replace(/^models\//, "") ?? "",
+    }))
+    .filter((model) => isGeminiFrontier(model.id, model.supportedGenerationMethods))
+    .sort((a, b) => rankVersion(b.id) - rankVersion(a.id) || Number(b.id.endsWith("-pro")) - Number(a.id.endsWith("-pro")));
+  const current = candidates[0];
+  if (!current) throw new Error("Google Gemini registry did not return a routable stable model");
+  await db.prepare("UPDATE model_registry SET is_routable=0 WHERE provider='google'").run();
+  const exact = current.id === "gemini-3.6-flash";
+  await upsertLiveModel(db, {
+    provider: "google",
+    model_id: current.id,
+    display_name: current.displayName ?? current.id,
+    remote_created_at: 0,
+    version_rank: rankVersion(current.id),
+    input_price_micros: exact ? 1_500_000 : 3_000_000,
+    output_price_micros: exact ? 7_500_000 : 15_000_000,
+  });
+  await setSyncState(db, "google", "connected", current.id, null);
+}
+
 export async function syncProviderRegistry(force = false) {
   const env = runtimeEnv();
   const db = env.DB;
@@ -137,6 +183,7 @@ export async function syncProviderRegistry(force = false) {
   const jobs: Array<[ProviderId, () => Promise<void>]> = [
     ["openai", () => syncOpenAi(db, env.OPENAI_API_KEY)],
     ["anthropic", () => syncAnthropic(db, env.ANTHROPIC_API_KEY)],
+    ["google", () => syncGoogle(db, env.GEMINI_API_KEY)],
     ["perplexity", () => setSyncState(db, "perplexity", env.PERPLEXITY_API_KEY ? "connected" : "needs_key", "sonar-pro", null)],
     ["higgsfield", () => setSyncState(db, "higgsfield", env.HIGGSFIELD_MCP_CONNECTED === "true" ? "mcp_connected" : "mcp_auth_required", "higgsfield-mcp", null)],
   ];
@@ -153,6 +200,8 @@ export async function currentModels(db: D1Database) {
 export function chooseLatestFrontier(models: RegistryRow[]) {
   const openai = models.find((model) => model.provider === "openai");
   const anthropic = models.find((model) => model.provider === "anthropic");
+  const google = models.find((model) => model.provider === "google");
+  if (!openai && !anthropic) return google;
   if (!openai) return anthropic;
   if (!anthropic) return openai;
   if (openai.source === "live-registry" && anthropic.source === "live-registry" && openai.remote_created_at !== anthropic.remote_created_at) {
@@ -164,6 +213,7 @@ export function chooseLatestFrontier(models: RegistryRow[]) {
 export function configured(env: RuntimeEnv, provider: ProviderId) {
   if (provider === "openai") return Boolean(env.OPENAI_API_KEY);
   if (provider === "anthropic") return Boolean(env.ANTHROPIC_API_KEY);
+  if (provider === "google") return Boolean(env.GEMINI_API_KEY);
   if (provider === "perplexity") return Boolean(env.PERPLEXITY_API_KEY);
   return env.HIGGSFIELD_MCP_CONNECTED === "true";
 }
@@ -217,6 +267,33 @@ async function invokeAnthropic(key: string, model: string, prompt: string): Prom
   return { provider: "anthropic", model, text: payload.content?.filter((item) => item.type === "text").map((item) => item.text ?? "").join("\n") ?? "", inputUnits: payload.usage?.input_tokens ?? 0, outputUnits: payload.usage?.output_tokens ?? 0 };
 }
 
+async function invokeGemini(key: string, model: string, prompt: string): Promise<Invocation> {
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+    body: JSON.stringify({ model, input: prompt, store: false, generation_config: { max_output_tokens: 1_200 } }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!response.ok) throw new Error(`Google Gemini response failed with ${response.status}`);
+  const payload = await response.json() as {
+    steps?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
+    usage?: { total_input_tokens?: number; total_output_tokens?: number; total_thought_tokens?: number };
+  };
+  const text = (payload.steps ?? [])
+    .filter((step) => step.type === "model_output")
+    .flatMap((step) => step.content ?? [])
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
+    .join("\n");
+  return {
+    provider: "google",
+    model,
+    text,
+    inputUnits: payload.usage?.total_input_tokens ?? 0,
+    outputUnits: (payload.usage?.total_output_tokens ?? 0) + (payload.usage?.total_thought_tokens ?? 0),
+  };
+}
+
 export async function invokePerplexity(key: string, prompt: string): Promise<Invocation> {
   const response = await fetch("https://api.perplexity.ai/v1/sonar", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "sonar-pro", max_tokens: 1200, messages: [{ role: "user", content: prompt }] }), signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`Perplexity response failed with ${response.status}`);
@@ -245,20 +322,38 @@ export async function runAssistant(prompt: string, preference: ModelPreference) 
   const spent = await env.DB.prepare("SELECT COALESCE(SUM(provider_cost_micros),0) AS cost FROM usage_ledger WHERE substr(created_at,1,7)=substr(CURRENT_TIMESTAMP,1,7)").first<{ cost: number }>();
   if (Number(spent?.cost ?? 0) >= budget) throw Object.assign(new Error("이번 달 공급사 원가 예산에 도달했습니다."), { code: "BUDGET_EXHAUSTED", status: 402 });
 
-  const order: ProviderId[] = task === "research" ? ["perplexity"] : preference === "gpt" ? ["openai", "anthropic"] : preference === "claude" ? ["anthropic", "openai"] : latest?.provider === "anthropic" ? ["anthropic", "openai"] : ["openai", "anthropic"];
+  const order: ProviderId[] = task === "research"
+    ? ["perplexity", "google", "openai", "anthropic"]
+    : preference === "gpt"
+      ? ["openai", "google", "anthropic"]
+      : preference === "claude"
+        ? ["anthropic", "google", "openai"]
+        : preference === "gemini"
+          ? ["google", "openai", "anthropic"]
+          : latest?.provider === "anthropic"
+            ? ["anthropic", "google", "openai"]
+            : latest?.provider === "google"
+              ? ["google", "openai", "anthropic"]
+              : ["openai", "google", "anthropic"];
   const errors: string[] = [];
   for (const provider of order) {
     if (!configured(env, provider)) continue;
     const model = models.find((item) => item.provider === provider);
     try {
-      const invocation = provider === "openai" ? await invokeOpenAi(env.OPENAI_API_KEY!, model?.model_id ?? "gpt-5.6", prompt) : provider === "anthropic" ? await invokeAnthropic(env.ANTHROPIC_API_KEY!, model?.model_id ?? "claude-fable-5", prompt) : await invokePerplexity(env.PERPLEXITY_API_KEY!, prompt);
+      const invocation = provider === "openai"
+        ? await invokeOpenAi(env.OPENAI_API_KEY!, model?.model_id ?? "gpt-5.6", prompt)
+        : provider === "anthropic"
+          ? await invokeAnthropic(env.ANTHROPIC_API_KEY!, model?.model_id ?? "claude-fable-5", prompt)
+          : provider === "google"
+            ? await invokeGemini(env.GEMINI_API_KEY!, model?.model_id ?? "gemini-3.6-flash", prompt)
+            : await invokePerplexity(env.PERPLEXITY_API_KEY!, prompt);
       if (!invocation.text.trim()) throw new Error(`${provider} returned an empty response`);
       const costMicros = await recordUsage(env.DB, invocation, task, model);
       return { text: invocation.text, provider: invocation.provider, model: invocation.model, task, costUsd: costMicros / 1_000_000, citations: invocation.citations ?? [], live: true };
     } catch (error) { errors.push(safeError(error)); }
   }
   if (!order.some((provider) => configured(env, provider))) {
-    throw Object.assign(new Error(task === "research" ? "Perplexity API 키가 필요합니다." : "OpenAI 또는 Anthropic API 키가 필요합니다."), { code: "PROVIDER_KEY_REQUIRED", status: 503 });
+    throw Object.assign(new Error(task === "research" ? "Perplexity, Google, OpenAI 또는 Anthropic API 키가 필요합니다." : "OpenAI, Anthropic 또는 Google Gemini API 키가 필요합니다."), { code: "PROVIDER_KEY_REQUIRED", status: 503 });
   }
   throw Object.assign(new Error(errors.join(" · ") || "연결된 모델이 응답하지 않았습니다."), { code: "PROVIDER_ERROR", status: 502 });
 }
