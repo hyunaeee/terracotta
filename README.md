@@ -36,6 +36,7 @@ Terracotta는 GPT, Claude, Gemini, Perplexity, Higgsfield처럼 서로 다른 �
 - **자동 오케스트레이터** — 질문을 분석해 모델과 연결된 MCP 도구를 선택하고, 읽기 도구는 자동 실행한 뒤 결과를 다시 모델이 검증·정리합니다.
 - **안전한 실행 승인** — 메시지 전송·수정·삭제처럼 외부 상태를 바꾸는 작업은 서비스·도구·인자를 보여준 뒤 사용자 승인으로만 실행합니다.
 - **자동 모델 레지스트리** — 연결된 공급사의 모델 목록을 주기적으로 확인하고 최신 우선순위를 갱신합니다.
+- **최신 OpenAI 실행 경로** — Responses API에서 작업별 추론 강도, 출력 밀도, 도구 호출 상한, 프롬프트 캐시 키와 비식별 안전 식별자를 적용하고 공급사 저장은 끕니다.
 - **개인화된 모델 우선순위** — 최신 모델, GPT, Claude, Gemini 중 사용자가 직접 기본 순서를 정합니다.
 - **모델 연구소** — 최신 모델의 장단점, 잘하는 작업, LM Arena 카테고리별 순위와 Artificial Analysis 지표를 출처와 함께 비교합니다.
 - **5×4 비트맵 가든** — 흙에서 시작해 잔디를 한 칸씩 심고, 같은 잔디 20칸을 채우면 하나의 이어진 정원이 됩니다.
@@ -96,25 +97,27 @@ node bench/routing-bench.mjs
 
 | 정책 | 평균 품질 | 태스크당 비용 |
 |---|---|---|
-| **terracotta auto (latest-first)** | 0.967 | **$0.0138** |
+| **terracotta auto (latest-first)** | 0.967 | **$0.0105** |
 | terracotta claude-first | **1.000** | $0.0213 |
-| baseline: always GPT-5.6 | 0.833 | $0.0169 |
+| baseline: always GPT-5.6 Sol | 0.833 | $0.0116 |
 | baseline: always Claude Fable 5 | 0.867 | $0.0289 |
 | baseline: always Sonnet 5 (저가 고정) | 0.867 | $0.0087 |
 
-- auto vs 최고가 단일 모델(Fable 5 고정): **비용 −52.4% · 품질 +11.5%**
-- auto vs GPT-5.6 고정: 비용 −18.7% · 품질 +16.1%
+- auto vs 최고가 단일 모델(Fable 5 고정): **비용 −63.8% · 품질 +11.5%**
+- auto vs GPT-5.6 Sol 고정: 비용 −9.4% · 품질 +16.1%
 - 저가 고정(Sonnet 5)보다 비싸지만 리서치·창작 품질을 포기하지 않음 — 라우팅의 존재 이유
 
 ## 기술 구성
 
-- Next.js 16 + React 19
-- vinext + Cloudflare Workers
+- Next.js 16.3 + React 19.2
+- vinext 1.0 beta + Vite 8.2 + Cloudflare Workers
+- OpenAI Responses API + GPT-5.6 Sol 자동 레지스트리
 - Cloudflare D1 + Drizzle ORM
 - 공급사별 모델 레지스트리 및 사용량 원장
 - Streamable HTTP MCP + OAuth 2.0/PKCE
 - Docker + GitHub Container Registry
 - Caddy 자동 HTTPS + GitHub OAuth 팀 로그인
+- Node.js 24 LTS 컨테이너 런타임
 
 ## 로컬에서 실행하기
 
@@ -137,7 +140,7 @@ docker compose up -d --build
 
 #### 요구 사항
 
-- Node.js `>=22.13.0`
+- Node.js `>=24.0.0`
 - npm
 
 #### 설치

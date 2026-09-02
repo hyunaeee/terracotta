@@ -22,12 +22,12 @@ const tasks = JSON.parse(readFileSync(join(here, "tasks.json"), "utf8"));
 
 // price seeds from lib/terracotta-router.ts (micros per 1M tokens)
 const MODELS = {
-  "gpt-5.6": { provider: "openai", input: 5, output: 30 },        // $/1M tokens
+  "gpt-5.6-sol": { provider: "openai", input: 4, output: 20 },    // $/1M tokens
   "claude-fable-5": { provider: "anthropic", input: 10, output: 50 },
   "claude-sonnet-5": { provider: "anthropic", input: 3, output: 15 },
   "sonar-pro": { provider: "perplexity", input: 3, output: 15 },
 };
-const FRONTIER = { openai: "gpt-5.6", anthropic: "claude-fable-5" };
+const FRONTIER = { openai: "gpt-5.6-sol", anthropic: "claude-fable-5" };
 
 const QUALITY = {
   research: { perplexity: 1.0, openai: 0.6, anthropic: 0.6 },
@@ -49,7 +49,7 @@ function costUsd(modelId, task) {
 const POLICIES = [
   { name: "terracotta auto (latest-first)", order: ["openai"], detectResearch: true },
   { name: "terracotta claude-first", order: ["anthropic"], detectResearch: true },
-  { name: "baseline: always GPT-5.6", model: "gpt-5.6", detectResearch: false },
+  { name: "baseline: always GPT-5.6 Sol", model: "gpt-5.6-sol", detectResearch: false },
   { name: "baseline: always Claude Fable 5", model: "claude-fable-5", detectResearch: false },
   { name: "baseline: always Sonnet 5 (cheap)", model: "claude-sonnet-5", detectResearch: false },
 ];

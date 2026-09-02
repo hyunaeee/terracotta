@@ -269,6 +269,30 @@ test("orchestrates models and MCP tools with durable write approval", async () =
   assert.match(migration, /CREATE TABLE `orchestration_events`/);
 });
 
+test("runs the current GPT flagship through a privacy-aware Responses API path", async () => {
+  const [router, orchestrator, health, dockerfile, pkg] = await Promise.all([
+    source("lib/terracotta-router.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("app/api/health/route.ts"),
+    source("Dockerfile"),
+    source("package.json"),
+  ]);
+
+  assert.match(router, /model: "gpt-5\.6-sol"/);
+  assert.match(router, /input: 4_000_000, output: 20_000_000/);
+  assert.match(router, /openAiTierRank/);
+  assert.match(orchestrator, /store: false/);
+  assert.match(orchestrator, /context: "current_turn"/);
+  assert.match(orchestrator, /safety_identifier/);
+  assert.match(orchestrator, /prompt_cache_key/);
+  assert.match(orchestrator, /max_tool_calls: MAX_TOOL_CALLS_PER_RUN/);
+  assert.match(health, /aiApi: "responses-v1"/);
+  assert.match(health, /providerStorage: false/);
+  assert.match(dockerfile, /node:24\.20\.0-bookworm-slim/);
+  assert.match(pkg, /"vinext": "\^1\.0\.0-beta\.8"/);
+  assert.match(pkg, /"vite": "\^8\.2\.2"/);
+});
+
 test("persists provider-neutral work context and hands it between GPT, Claude, and Gemini", async () => {
   const [context, contextRoute, assistantRoute, orchestrator, page, css, schema, migration] = await Promise.all([
     source("lib/work-context.ts"),

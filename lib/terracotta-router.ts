@@ -47,7 +47,7 @@ const schemaStatements = [
 ];
 
 const seeds = [
-  { provider: "openai" as const, model: "gpt-5.6", name: "GPT-5.6 Sol", rank: 560, input: 5_000_000, output: 30_000_000 },
+  { provider: "openai" as const, model: "gpt-5.6-sol", name: "GPT-5.6 Sol", rank: 560, input: 4_000_000, output: 20_000_000 },
   { provider: "anthropic" as const, model: "claude-fable-5", name: "Claude Fable 5", rank: 510, input: 10_000_000, output: 50_000_000 },
   { provider: "anthropic" as const, model: "claude-sonnet-5", name: "Claude Sonnet 5", rank: 500, input: 3_000_000, output: 15_000_000 },
   { provider: "google" as const, model: "gemini-3.6-flash", name: "Gemini 3.6 Flash", rank: 360, input: 1_500_000, output: 7_500_000 },
@@ -73,6 +73,27 @@ function isOpenAiFrontier(id: string) {
   return /^gpt-\d+(?:\.\d+)*(?:-(?:sol|terra|luna))?$/i.test(id) && !/(mini|nano|chat|codex|audio|realtime|search|image)/i.test(id);
 }
 
+function openAiTierRank(id: string) {
+  if (/-sol$/i.test(id)) return 3;
+  if (!/-(?:terra|luna)$/i.test(id)) return 2;
+  if (/-terra$/i.test(id)) return 1;
+  return 0;
+}
+
+function openAiDisplayName(id: string) {
+  const match = id.match(/^gpt-(\d+(?:\.\d+)*)(?:-(sol|terra|luna))?$/i);
+  if (!match) return id;
+  const tier = match[2] ?? "sol";
+  return `GPT-${match[1]} ${tier[0].toUpperCase()}${tier.slice(1).toLowerCase()}`;
+}
+
+function openAiPrices(id: string) {
+  if (/-luna$/i.test(id)) return [200_000, 1_200_000] as const;
+  if (/-terra$/i.test(id)) return [2_000_000, 12_000_000] as const;
+  if (/^(?:gpt-5\.6|gpt-5\.6-sol)$/i.test(id)) return [4_000_000, 20_000_000] as const;
+  return [10_000_000, 60_000_000] as const;
+}
+
 function isClaudeFrontier(id: string) {
   return /^claude-(?:fable|sonnet|opus)-\d/i.test(id) && !/(haiku|instant)/i.test(id);
 }
@@ -92,6 +113,7 @@ async function ensureDatabase(db: D1Database) {
     const status = seed.provider === "higgsfield" ? "mcp_auth_required" : "needs_key";
     await db.prepare("INSERT OR IGNORE INTO provider_sync (provider, status, current_model) VALUES (?, ?, ?)").bind(seed.provider, status, seed.model).run();
   }
+  await db.prepare("UPDATE provider_sync SET current_model='gpt-5.6-sol', next_sync_at=NULL WHERE provider='openai' AND current_model='gpt-5.6' AND status='needs_key'").run();
   await db.prepare("UPDATE provider_sync SET current_model='claude-fable-5', next_sync_at=NULL WHERE provider='anthropic' AND current_model='claude-sonnet-5' AND status='needs_key'").run();
 }
 
@@ -108,16 +130,18 @@ async function upsertLiveModel(db: D1Database, model: Omit<RegistryRow, "is_rout
 }
 
 async function syncOpenAi(db: D1Database, key?: string) {
-  if (!key) return setSyncState(db, "openai", "needs_key", "gpt-5.6", null);
+  if (!key) return setSyncState(db, "openai", "needs_key", "gpt-5.6-sol", null);
   const response = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`OpenAI model registry returned ${response.status}`);
   const payload = await response.json() as { data?: Array<{ id: string; created?: number }> };
-  const candidates = (payload.data ?? []).filter((model) => isOpenAiFrontier(model.id)).sort((a, b) => (b.created ?? 0) - (a.created ?? 0) || rankVersion(b.id) - rankVersion(a.id));
+  const candidates = (payload.data ?? [])
+    .filter((model) => isOpenAiFrontier(model.id))
+    .sort((a, b) => rankVersion(b.id) - rankVersion(a.id) || openAiTierRank(b.id) - openAiTierRank(a.id) || (b.created ?? 0) - (a.created ?? 0));
   const current = candidates[0];
   if (!current) throw new Error("OpenAI registry did not return a routable frontier model");
   await db.prepare("UPDATE model_registry SET is_routable=0 WHERE provider='openai'").run();
-  const exact = /^(gpt-5\.6|gpt-5\.6-sol)$/i.test(current.id);
-  await upsertLiveModel(db, { provider: "openai", model_id: current.id, display_name: current.id, remote_created_at: current.created ?? 0, version_rank: rankVersion(current.id), input_price_micros: exact ? 5_000_000 : 10_000_000, output_price_micros: exact ? 30_000_000 : 60_000_000 });
+  const prices = openAiPrices(current.id);
+  await upsertLiveModel(db, { provider: "openai", model_id: current.id, display_name: openAiDisplayName(current.id), remote_created_at: current.created ?? 0, version_rank: rankVersion(current.id), input_price_micros: prices[0], output_price_micros: prices[1] });
   await setSyncState(db, "openai", "connected", current.id, null);
 }
 
@@ -254,7 +278,7 @@ function extractOpenAiText(payload: { output_text?: string; output?: Array<{ con
 }
 
 async function invokeOpenAi(key: string, model: string, prompt: string): Promise<Invocation> {
-  const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: prompt, max_output_tokens: 1200 }), signal: AbortSignal.timeout(60_000) });
+  const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: prompt, store: false, reasoning: { effort: "low", context: "current_turn" }, text: { verbosity: "medium" }, max_output_tokens: 1200 }), signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`OpenAI response failed with ${response.status}`);
   const payload = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }>; usage?: { input_tokens?: number; output_tokens?: number } };
   return { provider: "openai", model, text: extractOpenAiText(payload), inputUnits: payload.usage?.input_tokens ?? 0, outputUnits: payload.usage?.output_tokens ?? 0 };
@@ -341,7 +365,7 @@ export async function runAssistant(prompt: string, preference: ModelPreference) 
     const model = models.find((item) => item.provider === provider);
     try {
       const invocation = provider === "openai"
-        ? await invokeOpenAi(env.OPENAI_API_KEY!, model?.model_id ?? "gpt-5.6", prompt)
+        ? await invokeOpenAi(env.OPENAI_API_KEY!, model?.model_id ?? "gpt-5.6-sol", prompt)
         : provider === "anthropic"
           ? await invokeAnthropic(env.ANTHROPIC_API_KEY!, model?.model_id ?? "claude-fable-5", prompt)
           : provider === "google"

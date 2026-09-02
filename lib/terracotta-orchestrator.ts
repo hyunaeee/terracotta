@@ -146,6 +146,16 @@ function compact(value: string, max: number) {
   return value.replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+async function safetyIdentifier(request: Request) {
+  const source = new TextEncoder().encode(`terracotta:${ownerId(request)}`);
+  const digest = await crypto.subtle.digest("SHA-256", source);
+  return `tc_${Array.from(new Uint8Array(digest)).slice(0, 16).map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function openAiReasoningEffort(task: TaskKind) {
+  return task === "general" ? "low" : "medium";
+}
+
 function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "tool";
 }
@@ -266,11 +276,26 @@ function openAiText(output: Array<Record<string, unknown>>) {
     .filter((part) => part.type === "output_text").map((part) => String(part.text ?? "")).join("\n").trim();
 }
 
-async function invokeOpenAiTurn(key: string, model: string, state: OpenAiState, tools: OrchestratorTool[]) {
+async function invokeOpenAiTurn(request: Request, task: TaskKind, key: string, model: string, state: OpenAiState, tools: OrchestratorTool[]) {
+  const safetyId = await safetyIdentifier(request);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, instructions: SYSTEM_PROMPT, input: state.input, tools: openAiTools(tools), tool_choice: tools.length ? "auto" : "none", parallel_tool_calls: false, max_output_tokens: 2_000 }),
+    body: JSON.stringify({
+      model,
+      instructions: SYSTEM_PROMPT,
+      input: state.input,
+      store: false,
+      reasoning: { effort: openAiReasoningEffort(task), context: "current_turn" },
+      text: { verbosity: "medium" },
+      safety_identifier: safetyId,
+      prompt_cache_key: safetyId,
+      tools: openAiTools(tools),
+      tool_choice: tools.length ? "auto" : "none",
+      parallel_tool_calls: false,
+      ...(tools.length ? { max_tool_calls: MAX_TOOL_CALLS_PER_RUN } : {}),
+      max_output_tokens: 2_000,
+    }),
     signal: AbortSignal.timeout(90_000),
   });
   if (!response.ok) throw new Error(`OpenAI orchestration failed with ${response.status}`);
@@ -340,9 +365,9 @@ async function invokeGeminiTurn(key: string, model: string, state: GeminiState, 
   };
 }
 
-async function invokeTurn(provider: PlannerProvider, model: string, state: ProviderState, tools: OrchestratorTool[]) {
+async function invokeTurn(request: Request, task: TaskKind, provider: PlannerProvider, model: string, state: ProviderState, tools: OrchestratorTool[]) {
   const environment = runtimeEnv();
-  if (provider === "openai" && state.kind === "openai") return invokeOpenAiTurn(environment.OPENAI_API_KEY!, model, state, tools);
+  if (provider === "openai" && state.kind === "openai") return invokeOpenAiTurn(request, task, environment.OPENAI_API_KEY!, model, state, tools);
   if (provider === "anthropic" && state.kind === "anthropic") return invokeAnthropicTurn(environment.ANTHROPIC_API_KEY!, model, state, tools);
   if (provider === "google" && state.kind === "google") return invokeGeminiTurn(environment.GEMINI_API_KEY!, model, state, tools);
   throw new Error("Provider state does not match the selected model");
@@ -417,7 +442,7 @@ async function reviewAnswer(request: Request, runId: string, prompt: string, dra
   const reviewPrompt = `사용자 요청:\n${prompt}\n\n초안:\n${draft}\n\n사실 오류와 빠진 요구를 검토하고, 필요하면 고쳐서 최종 답변만 한국어로 작성하세요.`;
   const provider = backup.provider as PlannerProvider;
   const initial = initialProviderState(provider, reviewPrompt);
-  const turn = await invokeTurn(provider, backup.model_id, initial, []);
+  const turn = await invokeTurn(request, task, provider, backup.model_id, initial, []);
   const invocation: Invocation = { provider, model: backup.model_id, text: turn.text, inputUnits: turn.inputUnits, outputUnits: turn.outputUnits };
   const costMicros = await recordUsage(runtimeEnv().DB, invocation, task, backup);
   await recordEvent(request, runId, { type: "review", provider, model: backup.model_id, status: "completed", output: turn.text });
@@ -443,7 +468,7 @@ async function runProviderAgent(args: {
 
   await updateRunProvider(runId, provider, model.model_id);
   for (let round = 0; round < MAX_AGENT_ROUNDS; round++) {
-    const turn = await invokeTurn(provider, model.model_id, state, tools);
+    const turn = await invokeTurn(request, task, provider, model.model_id, state, tools);
     state = turn.state;
     costMicros += await recordUsage(runtimeEnv().DB, { provider, model: model.model_id, text: turn.text, inputUnits: turn.inputUnits, outputUnits: turn.outputUnits }, task, model);
     await recordEvent(request, runId, { type: "model", provider, model: model.model_id, status: "completed", output: turn.text || `${turn.calls.length} tool call(s)` });
@@ -508,7 +533,7 @@ async function runProviderAgent(args: {
     state = appendResults(state, mapped.map((call) => call.result!));
   }
 
-  const finalTurn = await invokeTurn(provider, model.model_id, state, []);
+  const finalTurn = await invokeTurn(request, task, provider, model.model_id, state, []);
   costMicros += await recordUsage(runtimeEnv().DB, { provider, model: model.model_id, text: finalTurn.text, inputUnits: finalTurn.inputUnits, outputUnits: finalTurn.outputUnits }, task, model);
   const text = finalTurn.text || "도구 실행은 마쳤지만 최종 답변을 만들지 못했어요.";
   await completeRun(request, runId, trace, costMicros);

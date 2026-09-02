@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22.14.0-bookworm-slim AS build
+FROM node:24.20.0-bookworm-slim AS build
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM node:22.14.0-bookworm-slim AS runtime
+FROM node:24.20.0-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     PORT=8080 \
@@ -22,7 +22,7 @@ WORKDIR /app
 
 # The app is already bundled as a Worker. Only Wrangler is needed to host that
 # Worker locally with durable D1 storage.
-RUN npm install --global wrangler@4.92.0 \
+RUN npm install --global wrangler@4.128.0 \
     && groupadd --system terracotta \
     && useradd --system --gid terracotta --home-dir /app terracotta \
     && mkdir -p /data \

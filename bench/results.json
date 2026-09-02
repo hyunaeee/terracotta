@@ -2,10 +2,10 @@
   {
     "policy": "terracotta auto (latest-first)",
     "avgQuality": 0.967,
-    "totalCostUsd": 0.3302,
-    "costPerTask": 0.01376,
+    "totalCostUsd": 0.2512,
+    "costPerTask": 0.01047,
     "picks": {
-      "gpt-5.6": 16,
+      "gpt-5.6-sol": 16,
       "sonar-pro": 8
     }
   },
@@ -20,12 +20,12 @@
     }
   },
   {
-    "policy": "baseline: always GPT-5.6",
+    "policy": "baseline: always GPT-5.6 Sol",
     "avgQuality": 0.833,
-    "totalCostUsd": 0.4063,
-    "costPerTask": 0.01693,
+    "totalCostUsd": 0.2772,
+    "costPerTask": 0.01155,
     "picks": {
-      "gpt-5.6": 24
+      "gpt-5.6-sol": 24
     }
   },
   {
