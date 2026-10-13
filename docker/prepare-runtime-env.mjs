@@ -52,6 +52,7 @@ const values = {
   TERRACOTTA_MONTHLY_BUDGET_USD:
     process.env.TERRACOTTA_MONTHLY_BUDGET_USD ?? "24",
   TERRACOTTA_SELF_HOSTED: "true",
+  TERRACOTTA_TRUST_AUTH_HEADERS: process.env.TERRACOTTA_TRUST_AUTH_HEADERS === "true" ? "true" : "false",
   MCP_TOKEN_ENCRYPTION_KEY: await resolveEncryptionKey(),
 };
 

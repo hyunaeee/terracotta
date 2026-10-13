@@ -9,7 +9,9 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/selfhost-runtime.test.mjs",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/selfhost-runtime.test.mjs tests/approval-behavior.test.mjs",
+    "test:behavior": "node --test tests/approval-behavior.test.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

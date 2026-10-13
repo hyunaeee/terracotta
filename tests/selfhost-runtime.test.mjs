@@ -33,6 +33,7 @@ test("self-hosting generates and reuses a persistent MCP encryption key", async 
       "utf8",
     );
     assert.match(firstRuntime, /TERRACOTTA_SELF_HOSTED="true"/);
+    assert.match(firstRuntime, /TERRACOTTA_TRUST_AUTH_HEADERS="false"/);
     assert.equal(Buffer.from(firstKey.trim(), "base64").length, 32);
 
     const second = runRuntimeSetup(runtimeFile, sandbox);
