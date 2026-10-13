@@ -1,6 +1,8 @@
 import { env as cloudflareEnv } from "cloudflare:workers";
+import { requestOwner, type IdentityEnvironment } from "./request-owner";
+import { toolRisk, type ToolPolicyMetadata } from "./tool-policy";
 
-type McpEnv = { DB: D1Database; MCP_TOKEN_ENCRYPTION_KEY?: string };
+type McpEnv = IdentityEnvironment & { DB: D1Database; MCP_TOKEN_ENCRYPTION_KEY?: string };
 type Connection = {
   id: string; owner_id: string; name: string; server_url: string; category: string; status: string; auth_type: string;
   tool_count: number; tools_json: string; encrypted_access_token: string | null; encrypted_refresh_token: string | null;
@@ -54,7 +56,7 @@ const schema = [
 ];
 
 function env() { return cloudflareEnv as unknown as McpEnv; }
-export function ownerId(request: Request) { return request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() || "owner"; }
+export function ownerId(request: Request) { return requestOwner(request, env()); }
 function safeMessage(error: unknown) { return (error instanceof Error ? error.message : "MCP connection failed").slice(0, 260); }
 
 function assertSafeUrl(value: string) {
@@ -156,7 +158,7 @@ async function connection(db: D1Database, owner: string, id: string) {
 
 export async function listMcpConnections(request: Request) {
   const db = env().DB; const owner = ownerId(request); await ensureHub(db, owner);
-  const rows = await db.prepare("SELECT id, name, server_url, category, status, auth_type, tool_count, tools_json, CASE WHEN oauth_client_id IS NULL THEN 0 ELSE 1 END AS has_credentials, last_checked_at, error FROM mcp_connections WHERE owner_id=?").bind(owner).all<Record<string, unknown>>();
+  const rows = await db.prepare("SELECT id, name, server_url, category, status, auth_type, tool_count, tools_json, CASE WHEN oauth_client_id IS NULL THEN 0 ELSE 1 END AS has_credentials, last_checked_at, error FROM mcp_connections WHERE owner_id=?").bind(owner).all<Record<string, unknown> & { id: string; name: string }>();
   const order = new Map(presets.map((item, index) => [item.id, index]));
   return rows.results.map((row) => {
     const preset = presets.find((item) => item.id === row.id);
@@ -262,11 +264,26 @@ async function activeAccessToken(db: D1Database, item: Connection) {
   return token.access_token;
 }
 
-export async function callMcpTool(request: Request, id: string, tool: string, args: Record<string, unknown>) {
+export type ToolApproval = { runId: string; token: string; callId: string };
+
+async function requireToolApproval(db: D1Database, owner: string, id: string, tool: string, args: Record<string, unknown>, approval?: ToolApproval) {
+  const denied = () => Object.assign(new Error("이 도구는 에이전트의 실행 승인이 필요합니다."), { code: "TOOL_APPROVAL_REQUIRED", status: 403 });
+  if (!approval) throw denied();
+  const run = await db.prepare("SELECT state_json, pending_calls_json FROM orchestration_runs WHERE id=? AND owner_id=? AND status='approval_executing'")
+    .bind(approval.runId, owner).first<{ state_json: string; pending_calls_json: string }>();
+  if (!run || JSON.parse(run.state_json).approvalToken !== approval.token) throw denied();
+  const calls = JSON.parse(run.pending_calls_json) as Array<{ callId: string; args: Record<string, unknown>; result?: unknown; tool: { connectionId: string; toolName: string } }>;
+  const call = calls.find((entry) => entry.callId === approval.callId && !entry.result);
+  if (!call || call.tool.connectionId !== id || call.tool.toolName !== tool || JSON.stringify(call.args) !== JSON.stringify(args)) throw denied();
+}
+
+export async function callMcpTool(request: Request, id: string, tool: string, args: Record<string, unknown>, approval?: ToolApproval) {
   const db = env().DB; const owner = ownerId(request); await ensureHub(db, owner); const item = await connection(db, owner, id);
   if (item.status !== "connected") throw new Error("먼저 MCP 서버를 연결해 주세요.");
-  const known = JSON.parse(item.tools_json || "[]") as Array<{ name?: string }>;
-  if (!known.some((entry) => entry.name === tool)) throw new Error("허용된 MCP 도구가 아니에요.");
+  const known = JSON.parse(item.tools_json || "[]") as ToolPolicyMetadata[];
+  const selected = known.find((entry) => entry.name === tool);
+  if (!selected) throw new Error("허용된 MCP 도구가 아니에요.");
+  if (toolRisk(selected) === "write") await requireToolApproval(db, owner, id, tool, args, approval);
   const token = await activeAccessToken(db, item);
   const initialized = await rpc(item.server_url, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "Terracotta", version: "1.0.0" } } }, token);
   if (initialized.unauthorized) throw new Error("MCP 인증이 만료됐어요. 다시 연결해 주세요.");

@@ -92,6 +92,16 @@ docker compose logs -f terracotta
 
 준비한 뒤 `.env`의 `TERRACOTTA_BIND=0.0.0.0`으로 바꿀 수 있습니다. 인증 없이 이 값을 바꿔 공용 인터넷에 노출하지 마세요.
 
+기본 `TERRACOTTA_TRUST_AUTH_HEADERS=false`에서는 요청이 보낸 이메일 헤더를 무시하고 한 명의 `owner`로 처리합니다. 인증 프록시가 외부 요청의 `oai-authenticated-user-email`을 **제거한 뒤 검증한 이메일로 다시 설정**하고, 앱에 직접 접근하는 경로를 차단했을 때만 `TERRACOTTA_TRUST_AUTH_HEADERS=true`로 설정하세요. 이 모드와 호스팅 플랫폼 모드에서는 이메일이 없는 MCP·에이전트 요청을 거절합니다. 로컬 `npm run dev`에서도 단일 사용자로 사용하려면 로컬 환경에 `TERRACOTTA_SELF_HOSTED=true`를 명시하세요.
+
+## 도구 승인과 장애 처리
+
+직접 `/api/mcp/tools` 호출은 읽기 도구만 허용합니다. 외부 변경 도구는 에이전트가 만든 승인 카드에서 실행해야 합니다. 승인 카드는 실행별·승인 단계별 토큰을 가지며, 서버가 승인 상태를 먼저 선점한 한 요청만 도구를 실행합니다. 업데이트 전에 만든 승인 카드는 다시 생성해야 합니다.
+
+도구 호출 후 응답이 유실되거나 프로세스가 종료되면 외부 작업이 이미 성공했을 수 있습니다. 서버는 선점한 승인을 자동으로 다시 열지 않습니다. `approval_executing` 또는 `approval_interrupted` 상태와 실행 기록을 확인하고 외부 서비스의 실제 결과를 대조한 뒤 새 작업 여부를 판단하세요. 이는 동시 승인과 재전송에 대한 중복 실행 방지이며, 외부 시스템까지 포함한 exactly-once 보장이 아닙니다.
+
+검증 방법과 범위는 [승인 검증 기록](docs/approval-validation.md)을 참고하세요.
+
 ## 중지
 
 ```bash

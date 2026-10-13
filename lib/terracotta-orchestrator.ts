@@ -1,4 +1,5 @@
-import { callMcpTool, listMcpConnections, ownerId } from "./mcp-hub";
+import { callMcpTool, listMcpConnections, ownerId, type ToolApproval } from "./mcp-hub";
+import { toolRisk, type ToolRisk } from "./tool-policy";
 import {
   chooseLatestFrontier,
   classifyTask,
@@ -15,7 +16,6 @@ import {
 } from "./terracotta-router";
 
 type JsonSchema = Record<string, unknown>;
-type ToolRisk = "read" | "write";
 type PlannerProvider = "openai" | "anthropic";
 
 type RawMcpTool = {
@@ -130,16 +130,6 @@ function schemaFor(tool: RawMcpTool): JsonSchema {
   const candidate = tool.inputSchema ?? tool.input_schema;
   if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
   return { type: "object", properties: {}, additionalProperties: true };
-}
-
-function toolRisk(tool: RawMcpTool): ToolRisk {
-  if (tool.annotations?.destructiveHint) return "write";
-  const text = `${tool.name ?? ""} ${tool.description ?? ""}`.toLowerCase();
-  const writes = /(create|update|delete|remove|write|send|post|publish|merge|close|reopen|add|edit|set|change|upload|move|assign|comment|reply|message|email|pay|refund|charge|deploy|execute|trigger|approve|reject|cancel|invite|share|생성|수정|삭제|전송|게시|결제)/;
-  if (writes.test(text)) return "write";
-  if (tool.annotations?.readOnlyHint === true) return "read";
-  const reads = /(get|list|search|read|fetch|query|find|lookup|inspect|view|download|status|history|retrieve|describe|검색|조회|읽기|목록)/;
-  return reads.test(text) ? "read" : "write";
 }
 
 async function ensureOrchestration(db: D1Database) {
@@ -276,7 +266,7 @@ function appendResults(state: ProviderState, results: ToolResult[]): ProviderSta
   return { kind: "anthropic", messages: [...state.messages, { role: "user", content: results.map((result) => ({ type: "tool_result", tool_use_id: result.callId, content: result.output, ...(result.isError ? { is_error: true } : {}) })) }] };
 }
 
-async function executeTool(request: Request, runId: string, prompt: string, task: TaskKind, call: PendingCall, models: RegistryRow[]) {
+async function executeTool(request: Request, runId: string, prompt: string, task: TaskKind, call: PendingCall, models: RegistryRow[], approval?: ToolApproval) {
   try {
     let output: string; let costMicros = 0;
     if (call.tool.kind === "perplexity") {
@@ -285,7 +275,7 @@ async function executeTool(request: Request, runId: string, prompt: string, task
       costMicros = await recordUsage(runtimeEnv().DB, invocation, task, models.find((item) => item.provider === "perplexity"));
       output = safeJson({ answer: invocation.text, citations: invocation.citations ?? [] });
     } else {
-      output = safeJson(await callMcpTool(request, call.tool.connectionId!, call.tool.toolName, call.args));
+      output = safeJson(await callMcpTool(request, call.tool.connectionId!, call.tool.toolName, call.args, approval));
     }
     await recordEvent(request, runId, { type: "tool", provider: call.tool.kind === "perplexity" ? "perplexity" : "mcp", connectionId: call.tool.connectionId, tool: call.tool.toolName, risk: call.tool.risk, status: "completed", input: call.args, output });
     return { result: { callId: call.callId, output, isError: false }, costMicros };
@@ -298,9 +288,10 @@ async function executeTool(request: Request, runId: string, prompt: string, task
 
 async function saveApproval(request: Request, runId: string, provider: PlannerProvider, model: string, state: ProviderState, tools: OrchestratorTool[], calls: PendingCall[], trace: OrchestrationTrace[], costMicros: number) {
   const expiresAt = new Date(Date.now() + APPROVAL_TTL_MS).toISOString();
+  const approvalToken = crypto.randomUUID();
   await runtimeEnv().DB.prepare("UPDATE orchestration_runs SET provider=?, model_id=?, state_json=?, tools_json=?, pending_calls_json=?, trace_json=?, cost_micros=?, status='approval_required', expires_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=?")
-    .bind(provider, model, JSON.stringify(state), JSON.stringify(tools), JSON.stringify(calls), JSON.stringify(trace), costMicros, expiresAt, runId, ownerId(request)).run();
-  return expiresAt;
+    .bind(provider, model, JSON.stringify({ ...state, approvalToken }), JSON.stringify(tools), JSON.stringify(calls), JSON.stringify(trace), costMicros, expiresAt, runId, ownerId(request)).run();
+  return { id: `${runId}:${approvalToken}`, expiresAt };
 }
 
 async function completeRun(request: Request, runId: string, trace: OrchestrationTrace[], costMicros: number) {
@@ -383,10 +374,10 @@ async function runProviderAgent(args: {
 
     if (pendingWrites.length) {
       trace = [...trace, ...pendingWrites.map((call) => ({ type: "tool" as const, label: `${call.tool.connectionName} · ${call.tool.toolName}`, status: "approval" as const }))];
-      const expiresAt = await saveApproval(request, runId, provider, model.model_id, state, tools, mapped, trace, costMicros);
+      const approval = await saveApproval(request, runId, provider, model.model_id, state, tools, mapped, trace, costMicros);
       return {
         provider, model: model.model_id, task, costUsd: costMicros / 1_000_000, citations: [], live: true, approvalRequired: true,
-        approval: { id: runId, summary: "외부 서비스의 데이터를 변경하는 작업입니다. 아래 내용을 확인해 주세요.", expiresAt, actions: pendingWrites.map((call) => ({ service: call.tool.connectionName, tool: call.tool.toolName, arguments: call.args })) },
+        approval: { ...approval, summary: "외부 서비스의 데이터를 변경하는 작업입니다. 아래 내용을 확인해 주세요.", actions: pendingWrites.map((call) => ({ service: call.tool.connectionName, tool: call.tool.toolName, arguments: call.args })) },
         orchestration: { runId, trace },
       };
     }
@@ -415,6 +406,7 @@ async function checkBudget() {
 }
 
 export async function runAssistant(request: Request, prompt: string, preference: ModelPreference): Promise<AssistantResult> {
+  ownerId(request);
   await syncProviderRegistry(false);
   await checkBudget();
   const task = classifyTask(prompt);
@@ -450,36 +442,56 @@ export async function runAssistant(request: Request, prompt: string, preference:
 
 export async function resolveApproval(request: Request, approvalId: string, decision: "approve" | "reject"): Promise<AssistantResult> {
   const db = runtimeEnv().DB;
+  const owner = ownerId(request);
+  const [runId, token, extra] = approvalId.split(":");
+  if (!runId || !token || extra) throw Object.assign(new Error("승인 요청을 다시 생성해 주세요."), { code: "APPROVAL_NOT_FOUND", status: 404 });
   await ensureOrchestration(db);
-  const run = await db.prepare("SELECT * FROM orchestration_runs WHERE id=? AND owner_id=?").bind(approvalId, ownerId(request)).first<RunRow>();
+  const run = await db.prepare("SELECT * FROM orchestration_runs WHERE id=? AND owner_id=?").bind(runId, owner).first<RunRow>();
   if (!run) throw Object.assign(new Error("승인 요청을 찾을 수 없어요."), { code: "APPROVAL_NOT_FOUND", status: 404 });
+  if (new Date(run.expires_at).getTime() <= Date.now()) throw Object.assign(new Error("승인 요청이 만료됐어요. 작업을 다시 요청해 주세요."), { code: "APPROVAL_EXPIRED", status: 410 });
   if (run.status !== "approval_required") throw Object.assign(new Error("이미 처리됐거나 유효하지 않은 승인 요청이에요."), { code: "APPROVAL_ALREADY_RESOLVED", status: 409 });
-  if (new Date(run.expires_at).getTime() < Date.now()) throw Object.assign(new Error("승인 요청이 만료됐어요. 작업을 다시 요청해 주세요."), { code: "APPROVAL_EXPIRED", status: 410 });
 
-  const state = parseJson<ProviderState>(run.state_json, { kind: "openai", input: [] });
+  const state = parseJson<ProviderState & { approvalToken?: string }>(run.state_json, { kind: "openai", input: [] });
+  if (state.approvalToken !== token) throw Object.assign(new Error("이전 승인 카드로 새 작업을 승인할 수 없어요."), { code: "APPROVAL_ALREADY_RESOLVED", status: 409 });
   const tools = parseJson<OrchestratorTool[]>(run.tools_json, []);
   const calls = parseJson<PendingCall[]>(run.pending_calls_json, []);
   let trace = parseJson<OrchestrationTrace[]>(run.trace_json, []);
   let costMicros = Number(run.cost_micros ?? 0);
   const models = await currentModels(db);
-  const results: ToolResult[] = [];
-
-  for (const call of calls) {
-    if (call.result) { results.push(call.result); continue; }
-    if (decision === "reject") {
-      const denied = { callId: call.callId, output: safeJson({ denied: true, message: "사용자가 외부 변경을 승인하지 않았습니다." }), isError: true };
-      results.push(denied);
-      await recordEvent(request, run.id, { type: "approval", provider: "mcp", connectionId: call.tool.connectionId, tool: call.tool.toolName, risk: call.tool.risk, status: "rejected", input: call.args, output: denied.output });
-      trace = trace.map((item) => item.status === "approval" && item.label === `${call.tool.connectionName} · ${call.tool.toolName}` ? { ...item, status: "error" } : item);
-    } else {
-      const executed = await executeTool(request, run.id, run.prompt, run.task_kind, call, models);
-      results.push(executed.result); costMicros += executed.costMicros;
-      trace = trace.map((item) => item.status === "approval" && item.label === `${call.tool.connectionName} · ${call.tool.toolName}` ? { ...item, status: executed.result.isError ? "error" : "done" } : item);
-    }
-  }
-
-  await db.prepare("UPDATE orchestration_runs SET status='running', pending_calls_json='[]', updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=?").bind(run.id, ownerId(request)).run();
   const model = models.find((item) => item.provider === run.provider && item.model_id === run.model_id) ?? models.find((item) => item.provider === run.provider);
   if (!model) throw Object.assign(new Error("승인 후 작업을 이어갈 모델을 찾지 못했어요."), { code: "MODEL_UNAVAILABLE", status: 503 });
-  return runProviderAgent({ request, runId: run.id, prompt: run.prompt, preference: run.preference, task: run.task_kind, provider: run.provider, model, models, tools, state: appendResults(state, results), trace, costMicros });
+  const results: ToolResult[] = [];
+
+  // The conditional write is the cross-request/cross-worker boundary. Only its
+  // winner may perform a side effect, even when many requests read pending state.
+  const claimed = await db.prepare("UPDATE orchestration_runs SET status='approval_executing', updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status='approval_required' AND state_json=? AND expires_at > ?")
+    .bind(run.id, owner, run.state_json, new Date().toISOString()).run();
+  if (claimed.meta.changes !== 1) throw Object.assign(new Error("이미 처리됐거나 유효하지 않은 승인 요청이에요."), { code: "APPROVAL_ALREADY_RESOLVED", status: 409 });
+
+  try {
+    for (const call of calls) {
+      if (call.result) { results.push(call.result); continue; }
+      if (decision === "reject") {
+        const denied = { callId: call.callId, output: safeJson({ denied: true, message: "사용자가 외부 변경을 승인하지 않았습니다." }), isError: true };
+        call.result = denied;
+        results.push(denied);
+        await recordEvent(request, run.id, { type: "approval", provider: "mcp", connectionId: call.tool.connectionId, tool: call.tool.toolName, risk: call.tool.risk, status: "rejected", input: call.args, output: denied.output });
+        trace = trace.map((item) => item.status === "approval" && item.label === `${call.tool.connectionName} · ${call.tool.toolName}` ? { ...item, status: "error" } : item);
+      } else {
+        const executed = await executeTool(request, run.id, run.prompt, run.task_kind, call, models, { runId: run.id, token, callId: call.callId });
+        call.result = executed.result;
+        results.push(executed.result); costMicros += executed.costMicros;
+        trace = trace.map((item) => item.status === "approval" && item.label === `${call.tool.connectionName} · ${call.tool.toolName}` ? { ...item, status: executed.result.isError ? "error" : "done" } : item);
+      }
+      // Record each outcome; never reopen a claimed approval after a timeout or crash.
+      await db.prepare("UPDATE orchestration_runs SET pending_calls_json=?, trace_json=?, cost_micros=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status='approval_executing'")
+        .bind(JSON.stringify(calls), JSON.stringify(trace), costMicros, run.id, owner).run();
+    }
+
+    await db.prepare("UPDATE orchestration_runs SET status='running', pending_calls_json='[]', updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=?").bind(run.id, ownerId(request)).run();
+    return await runProviderAgent({ request, runId: run.id, prompt: run.prompt, preference: run.preference, task: run.task_kind, provider: run.provider, model, models, tools, state: appendResults(state, results), trace, costMicros });
+  } catch (error) {
+    await db.prepare("UPDATE orchestration_runs SET status='approval_interrupted', updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status IN ('approval_executing','running')").bind(run.id, owner).run();
+    throw error;
+  }
 }
