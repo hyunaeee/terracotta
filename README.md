@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./public/favicon.svg" width="72" alt="Terracotta logo" />
+  <img src="https://raw.githubusercontent.com/hyunaeee/terracotta/refs/heads/codex/shared-model-context/public/favicon.svg" width="72" alt="Terracotta logo" />
 </p>
 
 <h1 align="center">Terracotta</h1>
@@ -14,7 +14,15 @@
   <a href="#로드맵">Roadmap</a>
 </p>
 
-![Terracotta home](./docs/screenshots/terracotta-home.png)
+## 개인 배포 버전
+
+개인 Vercel 작업실은 `codex/shared-model-context` 브랜치에서 배포합니다. Higgsfield로 만든 픽셀 온실에서 대화를 시작하고, 프로젝트별 기록을 GPT·Claude·Gemini 사이에서 이어갈 수 있습니다. 디자인을 수정할 때는 화분 마스코트, 제한된 색상, 선명한 픽셀 윤곽을 유지합니다.
+
+[운영 버전 README](https://github.com/hyunaeee/terracotta/blob/codex/shared-model-context/README.md) · [실행·로그인·배포 설정](https://github.com/hyunaeee/terracotta/blob/codex/shared-model-context/DEPLOYMENT.md)
+
+![개인 배포 버전의 픽셀 온실 작업실](https://raw.githubusercontent.com/hyunaeee/terracotta/refs/heads/codex/shared-model-context/docs/screenshots/terracotta-home.png)
+
+아래는 기본 브랜치의 셀프호스팅 버전 설명입니다.
 
 ## Terracotta란?
 
