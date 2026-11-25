@@ -1,10 +1,11 @@
-import { env } from "cloudflare:workers";
+import { env } from "#terracotta-runtime";
+import type { Database } from "../../../lib/database";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const runtimeEnv = env as typeof env & {
-    DB: D1Database;
+    DB: Database;
     TERRACOTTA_SELF_HOSTED?: string;
   };
 
@@ -18,6 +19,12 @@ export async function GET() {
         database: "ok",
         deployment:
           runtimeEnv.TERRACOTTA_SELF_HOSTED === "true" ? "self-hosted" : "cloud",
+        capabilities: {
+          aiApi: "responses-v1",
+          modelRegistry: "dynamic",
+          toolProtocol: "mcp-streamable-http",
+          providerStorage: false,
+        },
       },
       { headers: { "cache-control": "no-store" } },
     );

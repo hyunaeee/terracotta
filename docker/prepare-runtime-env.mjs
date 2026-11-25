@@ -47,11 +47,14 @@ async function resolveEncryptionKey() {
 const values = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "",
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? "",
   PERPLEXITY_API_KEY: process.env.PERPLEXITY_API_KEY ?? "",
   HIGGSFIELD_MCP_CONNECTED: process.env.HIGGSFIELD_MCP_CONNECTED ?? "false",
   TERRACOTTA_MONTHLY_BUDGET_USD:
     process.env.TERRACOTTA_MONTHLY_BUDGET_USD ?? "24",
   TERRACOTTA_SELF_HOSTED: "true",
+  TERRACOTTA_TRUST_AUTH_HEADERS:
+    process.env.TERRACOTTA_TRUST_AUTH_HEADERS ?? "false",
   MCP_TOKEN_ENCRYPTION_KEY: await resolveEncryptionKey(),
 };
 

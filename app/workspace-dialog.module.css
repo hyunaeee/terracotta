@@ -1,0 +1,17 @@
+dialog.viewport {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: inherit;
+}
+
+dialog.viewport:not([open]) {
+  display: none;
+}
+
+dialog.viewport::backdrop {
+  background: transparent;
+}

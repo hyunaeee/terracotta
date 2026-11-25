@@ -114,3 +114,128 @@ export const orchestrationEvents = sqliteTable("orchestration_events", {
   outputSummary: text("output_summary"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const workSessions = sqliteTable("work_sessions", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  projectId: text("project_id"),
+  title: text("title").notNull(),
+  goal: text("goal").notNull().default(""),
+  lastProvider: text("last_provider"),
+  lastModelId: text("last_model_id"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const workTurns = sqliteTable("work_turns", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  role: text("role").notNull(),
+  provider: text("provider"),
+  modelId: text("model_id"),
+  content: text("content").notNull(),
+  traceJson: text("trace_json").notNull().default("[]"),
+  runId: text("run_id"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const contextHandoffs = sqliteTable("context_handoffs", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  fromProvider: text("from_provider").notNull(),
+  toProvider: text("to_provider").notNull(),
+  packetJson: text("packet_json").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const contextRunLinks = sqliteTable("context_run_links", {
+  runId: text("run_id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const workSessionMembers = sqliteTable("work_session_members", {
+  sessionId: text("session_id").notNull(),
+  memberEmail: text("member_email").notNull(),
+  role: text("role").notNull().default("editor"),
+  invitedBy: text("invited_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [primaryKey({ columns: [table.sessionId, table.memberEmail] })]);
+
+export const teamHandoffs = sqliteTable("team_handoffs", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  fromEmail: text("from_email").notNull(),
+  toEmail: text("to_email").notNull(),
+  note: text("note").notNull().default(""),
+  status: text("status").notNull().default("pending"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  acceptedAt: text("accepted_at"),
+});
+
+export const localAgents = sqliteTable("local_agents", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  platform: text("platform"),
+  shell: text("shell"),
+  workspace: text("workspace"),
+  lastSeenAt: text("last_seen_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  revokedAt: text("revoked_at"),
+});
+
+export const localAgentJobs = sqliteTable("local_agent_jobs", {
+  id: text("id").primaryKey(),
+  agentId: text("agent_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  runId: text("run_id"),
+  projectId: text("project_id"),
+  operation: text("operation").notNull().default("run_terminal_command"),
+  argsJson: text("args_json").notNull().default("{}"),
+  command: text("command").notNull(),
+  cwd: text("cwd").notNull().default("."),
+  timeoutSeconds: integer("timeout_seconds").notNull().default(30),
+  status: text("status").notNull().default("queued"),
+  stdout: text("stdout").notNull().default(""),
+  stderr: text("stderr").notNull().default(""),
+  exitCode: integer("exit_code"),
+  changedFilesJson: text("changed_files_json").notNull().default("[]"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+});
+
+export const workspaceProjects = sqliteTable("workspace_projects", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  agentId: text("agent_id"),
+  rootPath: text("root_path").notNull().default("."),
+  instructions: text("instructions").notNull().default(""),
+  modelPreference: text("model_preference").notNull().default("latest"),
+  fileAccess: text("file_access").notNull().default("read-write"),
+  commandAccess: text("command_access").notNull().default("approval"),
+  color: text("color").notNull().default("#78906f"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  archivedAt: text("archived_at"),
+});
+
+export const projectFileEvents = sqliteTable("project_file_events", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  jobId: text("job_id"),
+  action: text("action").notNull(),
+  path: text("path"),
+  status: text("status").notNull(),
+  summary: text("summary").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

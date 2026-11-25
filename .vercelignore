@@ -1,0 +1,15 @@
+.agents/
+.codex/
+.env*
+.git/
+.next/
+.openai/
+.vercel/
+.vinext/
+.wrangler/
+build/
+dist/
+node_modules/
+outputs/
+work/
+*.tsbuildinfo

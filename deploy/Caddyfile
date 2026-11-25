@@ -1,0 +1,44 @@
+{$TERRACOTTA_DOMAIN} {
+	encode zstd gzip
+
+	request_header -oai-authenticated-user-email
+	request_header -oai-authenticated-user-full-name
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	handle /oauth2/* {
+		reverse_proxy oauth2-proxy:4180 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Uri {uri}
+		}
+	}
+
+	# The agent contains no credentials. Keep only this installer public; its API
+	# still requires the one-time token created by an authenticated user.
+	handle /terracotta-local-agent.mjs {
+		reverse_proxy terracotta:8080
+	}
+
+	handle {
+		forward_auth oauth2-proxy:4180 {
+			uri /oauth2/auth
+			header_up X-Real-IP {remote_host}
+			copy_headers {
+				X-Auth-Request-Email>oai-authenticated-user-email
+				X-Auth-Request-User>oai-authenticated-user-full-name
+			}
+
+			@unauthorized status 401
+			handle_response @unauthorized {
+				redir * /oauth2/sign_in?rd={scheme}://{host}{uri}
+			}
+		}
+
+		reverse_proxy terracotta:8080
+	}
+}

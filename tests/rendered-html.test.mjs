@@ -134,16 +134,108 @@ test("adds a sourced, live-updating model intelligence lab", async () => {
   assert.match(page, /Arena 공개 데이터 연결됨/);
   assert.match(page, /잘하는 것/);
   assert.match(page, /약한 것/);
+  assert.match(page, /전체 모델 요약/);
+  assert.match(page, /모델 핵심 비교/);
   assert.match(css, /\.model-insight-grid/);
   assert.match(css, /\.model-metrics/);
+  assert.match(css, /\.model-compare-table/);
   assert.match(intelligence, /lmarena-ai%2Fleaderboard-dataset/);
   assert.match(intelligence, /Artificial Analysis/);
-  assert.match(intelligence, /Claude Fable 5/);
-  assert.match(intelligence, /GPT-5\.6 Sol/);
+  assert.match(intelligence, /Claude Fable 5\.2/);
+  assert.match(intelligence, /GPT-6\.2 Sol/);
+  assert.match(intelligence, /Gemini 4 Hydrogen/);
   assert.match(intelligence, /Perplexity Sonar Pro/);
   assert.match(intelligence, /Kimi K3/);
   assert.match(intelligence, /AbortSignal\.timeout/);
   assert.match(route, /s-maxage=21600/);
+});
+
+test("pairs cross-platform local terminals through an approval-only outbound agent", async () => {
+  const [agent, orchestrator, page, css, schema, browserRoute, workerRoute, script, migration, productionCompose, caddy] = await Promise.all([
+    source("lib/local-agent.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("db/schema.ts"),
+    source("app/api/local-agent/route.ts"),
+    source("app/api/local-agent/worker/route.ts"),
+    source("public/terracotta-local-agent.mjs"),
+    source("drizzle/0006_chubby_karnak.sql"),
+    source("compose.production.yaml"),
+    source("deploy/Caddyfile"),
+  ]);
+
+  assert.match(agent, /SHA-256/);
+  assert.match(agent, /local_agent_jobs/);
+  assert.match(agent, /connectedLocalAgentTools/);
+  assert.match(agent, /risk: "write"/);
+  assert.match(agent, /runLocalAgentTool/);
+  assert.match(orchestrator, /local_shell/);
+  assert.match(orchestrator, /runLocalAgentTool/);
+  assert.match(page, /로컬 터미널/);
+  assert.match(page, /PowerShell/);
+  assert.match(page, /macOS \/ Linux/);
+  assert.match(css, /\.local-agent-dialog/);
+  assert.match(schema, /localAgents/);
+  assert.match(schema, /localAgentJobs/);
+  assert.match(browserRoute, /createLocalAgent/);
+  assert.match(workerRoute, /handleLocalAgentRequest/);
+  assert.match(script, /process\.platform === "win32"/);
+  assert.match(script, /\/bin\/zsh/);
+  assert.match(script, /insideWorkspace/);
+  assert.match(script, /blockedCommand/);
+  assert.match(script, /NonInteractive/);
+  assert.match(migration, /CREATE TABLE `local_agents`/);
+  assert.match(migration, /CREATE TABLE `local_agent_jobs`/);
+  assert.match(productionCompose, /oauth2-proxy/);
+  assert.match(productionCompose, /terracotta-data/);
+  assert.match(caddy, /X-Auth-Request-Email>oai-authenticated-user-email/);
+});
+
+test("organizes conversations, model context, and computer files by project", async () => {
+  const [projects, filesRoute, projectRoute, context, orchestrator, agent, worker, page, css, schema, migration] = await Promise.all([
+    source("lib/workspace-projects.ts"),
+    source("app/api/projects/files/route.ts"),
+    source("app/api/projects/route.ts"),
+    source("lib/work-context.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("lib/local-agent.ts"),
+    source("public/terracotta-local-agent.mjs"),
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("db/schema.ts"),
+    source("drizzle/0007_serious_blizzard.sql"),
+  ]);
+
+  assert.match(projects, /workspace_projects/);
+  assert.match(projects, /project_file_events/);
+  assert.match(projects, /normalizeRootPath/);
+  assert.match(projects, /ProjectFileAccess/);
+  assert.match(projectRoute, /listWorkspaceProjects/);
+  assert.match(filesRoute, /WRITE_CONFIRMATION_REQUIRED/);
+  assert.match(filesRoute, /inspect_project_changes/);
+  assert.match(context, /project_id/);
+  assert.match(context, /projectPacket/);
+  assert.match(orchestrator, /projectContext/);
+  assert.match(orchestrator, /project\?\.model_preference/);
+  assert.match(agent, /list_project_files/);
+  assert.match(agent, /read_project_file/);
+  assert.match(agent, /write_project_file/);
+  assert.match(agent, /project\.file_access/);
+  assert.match(agent, /project\.command_access/);
+  assert.match(worker, /realpath/);
+  assert.match(worker, /expectedHash/);
+  assert.match(worker, /search_project_files/);
+  assert.match(worker, /inspect_project_changes/);
+  assert.match(page, /프로젝트 워크스페이스/);
+  assert.match(page, /프로젝트 안에서 검색/);
+  assert.match(page, /대화·모델 인계·프로젝트 지침/);
+  assert.match(css, /\.project-file-workbench/);
+  assert.match(css, /\.project-activity/);
+  assert.match(schema, /workspaceProjects/);
+  assert.match(schema, /projectFileEvents/);
+  assert.match(migration, /CREATE TABLE `workspace_projects`/);
+  assert.match(migration, /ALTER TABLE `work_sessions` ADD `project_id`/);
 });
 
 test("orchestrates models and MCP tools with durable write approval", async () => {
@@ -161,6 +253,7 @@ test("orchestrates models and MCP tools with durable write approval", async () =
   assert.match(orchestrator, /callMcpTool/);
   assert.match(orchestrator, /function_call_output/);
   assert.match(orchestrator, /tool_result/);
+  assert.match(orchestrator, /function_result/);
   assert.match(orchestrator, /readOnlyHint/);
   assert.match(orchestrator, /approval_required/);
   assert.match(orchestrator, /resolveApproval/);
@@ -174,4 +267,124 @@ test("orchestrates models and MCP tools with durable write approval", async () =
   assert.match(schema, /orchestrationEvents/);
   assert.match(migration, /CREATE TABLE `orchestration_runs`/);
   assert.match(migration, /CREATE TABLE `orchestration_events`/);
+});
+
+test("runs the current GPT flagship through a privacy-aware Responses API path", async () => {
+  const [router, orchestrator, health, dockerfile, pkg] = await Promise.all([
+    source("lib/terracotta-router.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("app/api/health/route.ts"),
+    source("Dockerfile"),
+    source("package.json"),
+  ]);
+
+  assert.match(router, /model: "gpt-6\.2-sol"/);
+  assert.match(router, /input: 2_000_000, output: 10_000_000/);
+  assert.match(router, /openAiTierRank/);
+  assert.match(orchestrator, /store: false/);
+  assert.match(orchestrator, /context: "current_turn"/);
+  assert.match(orchestrator, /safety_identifier/);
+  assert.match(orchestrator, /prompt_cache_key/);
+  assert.match(orchestrator, /max_tool_calls: MAX_TOOL_CALLS_PER_RUN/);
+  assert.match(health, /aiApi: "responses-v1"/);
+  assert.match(health, /providerStorage: false/);
+  assert.match(dockerfile, /node:24\.20\.0-bookworm-slim/);
+  assert.match(pkg, /"vinext": "\^1\.0\.0-beta\.8"/);
+  assert.match(pkg, /"vite": "\^8\.2\.2"/);
+});
+
+test("persists provider-neutral work context and hands it between GPT, Claude, and Gemini", async () => {
+  const [context, contextRoute, assistantRoute, orchestrator, page, css, schema, migration] = await Promise.all([
+    source("lib/work-context.ts"),
+    source("app/api/context/route.ts"),
+    source("app/api/assistant/route.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("db/schema.ts"),
+    source("drizzle/0004_sturdy_toad_men.sql"),
+  ]);
+
+  assert.match(context, /work_sessions/);
+  assert.match(context, /work_turns/);
+  assert.match(context, /context_handoffs/);
+  assert.match(context, /context_run_links/);
+  assert.match(context, /buildProviderHistory/);
+  assert.match(context, /kind: "google"/);
+  assert.match(context, /Hidden reasoning is never transferred/);
+  assert.match(contextRoute, /recentSessions/);
+  assert.match(contextRoute, /private, no-store/);
+  assert.match(assistantRoute, /payload\.sessionId/);
+  assert.match(orchestrator, /recordContextHandoff/);
+  assert.match(orchestrator, /appendAssistantTurn/);
+  assert.match(orchestrator, /provider-neutral Terracotta work session/);
+  assert.match(page, /GPT로 이어하기/);
+  assert.match(page, /Claude로 이어하기/);
+  assert.match(page, /Gemini로 이어하기/);
+  assert.match(page, /GPT · Claude · Gemini 공용 기억/);
+  assert.match(css, /\.context-bridge/);
+  assert.match(css, /\.orchestration-trace span\.handoff/);
+  assert.match(schema, /workSessions/);
+  assert.match(schema, /workTurns/);
+  assert.match(schema, /contextHandoffs/);
+  assert.match(migration, /CREATE TABLE `work_sessions`/);
+  assert.match(migration, /CREATE TABLE `work_turns`/);
+  assert.match(migration, /CREATE TABLE `context_handoffs`/);
+});
+
+test("routes Gemini through the live registry, Interactions API, and Docker runtime", async () => {
+  const [router, orchestrator, registryRoute, assistantRoute, page, compose, productionCompose, runtime] = await Promise.all([
+    source("lib/terracotta-router.ts"),
+    source("lib/terracotta-orchestrator.ts"),
+    source("app/api/model-registry/route.ts"),
+    source("app/api/assistant/route.ts"),
+    source("app/page.tsx"),
+    source("compose.yaml"),
+    source("compose.production.yaml"),
+    source("docker/prepare-runtime-env.mjs"),
+  ]);
+
+  assert.match(router, /provider: "google"/);
+  assert.match(router, /gemini-4-hydrogen/);
+  assert.match(router, /v1beta\/models\?pageSize=1000/);
+  assert.match(router, /GEMINI_API_KEY/);
+  assert.match(orchestrator, /invokeGeminiTurn/);
+  assert.match(orchestrator, /v1beta\/interactions/);
+  assert.match(orchestrator, /total_thought_tokens/);
+  assert.match(registryRoute, /"gemini"/);
+  assert.match(assistantRoute, /"gemini"/);
+  assert.match(page, /Gemini 우선/);
+  assert.match(page, /Google Gemini/);
+  assert.match(compose, /GEMINI_API_KEY/);
+  assert.match(productionCompose, /GEMINI_API_KEY/);
+  assert.match(runtime, /GEMINI_API_KEY/);
+});
+
+test("shares work sessions with role-based team handoffs", async () => {
+  const [context, contextRoute, page, css, schema, migration] = await Promise.all([
+    source("lib/work-context.ts"),
+    source("app/api/context/route.ts"),
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("db/schema.ts"),
+    source("drizzle/0005_famous_magik.sql"),
+  ]);
+
+  assert.match(context, /work_session_members/);
+  assert.match(context, /team_handoffs/);
+  assert.match(context, /assertCanEdit/);
+  assert.match(context, /session\.access_role === "viewer"/);
+  assert.match(context, /shareWorkSession/);
+  assert.match(context, /handoffWorkSession/);
+  assert.match(context, /acceptTeamHandoff/);
+  assert.match(contextRoute, /action\?: "new" \| "share" \| "handoff" \| "revoke" \| "accept"/);
+  assert.match(page, /팀 공유/);
+  assert.match(page, /초대하고 넘기기/);
+  assert.match(page, /보기 전용 작업입니다/);
+  assert.match(css, /\.team-dialog/);
+  assert.match(css, /\.incoming-handoff/);
+  assert.match(schema, /workSessionMembers/);
+  assert.match(schema, /teamHandoffs/);
+  assert.match(migration, /CREATE TABLE `work_session_members`/);
+  assert.match(migration, /CREATE TABLE `team_handoffs`/);
 });

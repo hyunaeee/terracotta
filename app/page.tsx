@@ -1,15 +1,34 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+
+import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { ArenaCategory, ModelInsight } from "@/lib/model-intelligence";
+import { WorkspaceDialog } from "./workspace-dialog";
 
 const quickPrompts = [
-  "오늘 회의 내용을 정리해줘",
-  "이번 주에 배운 것을 복습해줘",
-  "새 프로젝트 아이디어를 같이 생각해줘",
-];
+  { title: "회의 정리", prompt: "오늘 회의 내용을 정리해줘", icon: "notes" },
+  { title: "학습 복습", prompt: "이번 주에 배운 것을 복습해줘", icon: "book" },
+  { title: "아이디어 탐색", prompt: "새 프로젝트 아이디어를 같이 생각해줘", icon: "sprout" },
+] as const;
 
-type ModelPreference = "latest" | "gpt" | "claude";
+const pixelIcons = {
+  chat: "M2 2h12v1h1v8h-1v1H8l-4 3v-3H2v-1H1V3h1zm1 2v6h3v2l2-2h5V4z",
+  folder: "M1 3h6l2 2h6v8H1zm2 4v4h10V7z",
+  sprout: "M1 3h4v1h2v2h1v2h1V5h1V3h2V2h3v4h-1v2h-2v1h-2v4h3v2H4v-2h4V9H5V8H3V7H2V5H1z",
+  link: "M9 2h4v1h2v4h-1v2h-2v1h-2V8h2V6h1V4h-3v1H8V3h1zM3 6h3v2H4v2H3v2h3v-1h2v2H7v1H3v-1H1V9h1V7h1zm3 1h4v2H6z",
+  terminal: "M1 3h14v11H1zm2 2v7h10V5zm1 1h2v1h1v2H6v1H4V9h1V7H4zm4 4h3v1H8z",
+  chart: "M1 13h14v2H1zm1-5h3v4H2zm5-5h3v9H7zm5 3h3v6h-3z",
+  sliders: "M1 4h3V2h3v2h8v2H7v2H4V6H1zm0 6h8V8h3v2h3v2h-3v2H9v-2H1z",
+  notes: "M3 1h8v2h2v1h1v11H3zm2 2v10h7V6H9V3zm1 4h5v1H6zm0 3h4v1H6z",
+  book: "M1 3h5v1h4V3h5v10h-5v1H6v-1H1zm2 2v6h3v1h1V6H6V5zm6 1v6h1v-1h3V5h-3v1z",
+} as const;
+
+function PixelIcon({ name }: { name: keyof typeof pixelIcons }) {
+  return <svg className="pixel-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" shapeRendering="crispEdges"><path fill="currentColor" fillRule="evenodd" d={pixelIcons[name]} /></svg>;
+}
+
+type ModelPreference = "latest" | "gpt" | "claude" | "gemini";
 type RegistryStatus = {
   syncIntervalHours: number;
   latestPrimary: { provider: string; model: string; modelId: string; source: string } | null;
@@ -37,17 +56,19 @@ const arenaMetricOrder: Array<{ id: ArenaCategory; label: string }> = [
 ];
 
 const modelCatalog = [
-  { id: "gpt", provider: "openai", mark: "G", name: "GPT-5.6 Sol", role: "주 추론 · 코딩" },
-  { id: "fable", provider: "anthropic", mark: "F", name: "Claude Fable 5", role: "최고 난도 · 장기 에이전트" },
-  { id: "claude", provider: "anthropic", mark: "C", name: "Claude Sonnet 5", role: "빠른 에이전트 · 문서" },
+  { id: "gpt", provider: "openai", mark: "G", name: "GPT-6.2 Sol", role: "주 추론 · 코딩" },
+  { id: "fable", provider: "anthropic", mark: "F", name: "Claude Fable 5.2", role: "최고 난도 · 장기 에이전트" },
+  { id: "claude", provider: "anthropic", mark: "C", name: "Claude Sonnet 5.5", role: "빠른 에이전트 · 문서" },
+  { id: "gemini", provider: "google", mark: "M", name: "Gemini 4 Hydrogen", role: "멀티모달 · 빠른 에이전트" },
   { id: "perplexity", provider: "perplexity", mark: "P", name: "Perplexity Sonar Pro", role: "웹 검색 · 리서치" },
   { id: "higgsfield", provider: "higgsfield", mark: "H", name: "Higgsfield", role: "이미지 · 영상" },
 ];
 
 const preferenceOptions: { id: ModelPreference; title: string; description: string }[] = [
   { id: "latest", title: "최신 모델 우선", description: "공식 최신 목록이 바뀌면 GPT와 Claude의 순서를 자동으로 바꿔요." },
-  { id: "gpt", title: "GPT 우선", description: "GPT를 먼저 쓰고, 필요할 때 Claude가 검토하거나 이어받아요." },
-  { id: "claude", title: "Claude 우선", description: "Claude를 먼저 쓰고, 필요할 때 GPT가 검토하거나 이어받아요." },
+  { id: "gpt", title: "GPT 우선", description: "GPT를 먼저 쓰고, Gemini와 Claude가 검토하거나 이어받아요." },
+  { id: "claude", title: "Claude 우선", description: "Claude를 먼저 쓰고, Gemini와 GPT가 검토하거나 이어받아요." },
+  { id: "gemini", title: "Gemini 우선", description: "Gemini를 먼저 쓰고, GPT와 Claude가 검토하거나 이어받아요." },
 ];
 
 const subscriptionPlans = [
@@ -101,7 +122,7 @@ const treeVarieties = [
   { id: "lavender", name: "라벤더 꽃나무", description: "차분한 보랏빛 꽃으로 자라요", cost: 3400, assets: treeStages.map((_, index) => `/assets/terracotta-lavender-${index}.png`) },
 ] as const;
 
-type OrchestrationStep = { type: "route" | "tool" | "review"; label: string; status: "done" | "approval" | "error" };
+type OrchestrationStep = { type: "route" | "tool" | "review" | "handoff"; label: string; status: "done" | "approval" | "error" };
 type ApprovalRequest = {
   id: string;
   summary: string;
@@ -109,7 +130,42 @@ type ApprovalRequest = {
   actions: Array<{ service: string; tool: string; arguments: Record<string, unknown> }>;
   status?: "pending" | "running" | "approved" | "rejected";
 };
-type Message = { role: "user" | "assistant"; text: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest };
+type SessionRole = "owner" | "editor" | "viewer";
+type Message = { role: "user" | "assistant"; text: string; author?: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest; retryPrompt?: string };
+type ContextTarget = { sessionId?: string; projectId?: string | null; create?: boolean };
+type ContextSession = { id: string; projectId?: string | null; title: string; lastProvider: string | null; ownerEmail?: string; role?: SessionRole };
+type TeamMember = { email: string; role: SessionRole; invitedBy: string | null; createdAt: string };
+type TeamHandoff = { id: string; fromEmail: string; toEmail: string; note: string; status: "pending" | "accepted"; createdAt: string };
+type ModelHandoff = { id: string; from: string; to: string; createdAt: string };
+type WorkspaceProject = {
+  id: string;
+  name: string;
+  description: string;
+  agentId: string | null;
+  rootPath: string;
+  instructions: string;
+  modelPreference: ModelPreference;
+  fileAccess: "read-only" | "read-write";
+  commandAccess: "disabled" | "approval";
+  color: string;
+  updatedAt: string;
+};
+type ProjectActivity = { id: string; action: string; path: string | null; status: string; summary: string; created_at: string };
+type ProjectFile = { path: string; type: "file" | "directory"; size: number; modifiedAt: string };
+type ProjectDocument = { path: string; content: string; hash: string; size: number; modifiedAt: string };
+type ProjectSearchMatch = { path: string; line: number | null; preview: string };
+type ContextPayload = {
+  currentUser: string;
+  selectedProjectId: string | null;
+  session: ContextSession | null;
+  messages: Message[];
+  members: TeamMember[];
+  handoffs: TeamHandoff[];
+  modelHandoffs: ModelHandoff[];
+  projects: WorkspaceProject[];
+  recentSessions: ContextSession[];
+  error?: string;
+};
 type AssistantPayload = {
   text?: string;
   model?: string;
@@ -120,6 +176,7 @@ type AssistantPayload = {
   approvalRequired?: boolean;
   approval?: ApprovalRequest;
   orchestration?: { runId: string; trace: OrchestrationStep[]; reviewedBy?: string };
+  context?: { sessionId: string; projectId: string | null; title: string; lastProvider: string; handoff?: { from: string; to: string; label: string } };
 };
 type GardenPosition = { x: number; y: number };
 type GroundTile = { cell: number; grassId: string };
@@ -150,6 +207,37 @@ type McpConnection = {
   has_credentials: boolean;
   last_checked_at: string | null;
   error: string | null;
+};
+type LocalAgent = {
+  id: string;
+  name: string;
+  platform: string | null;
+  shell: string | null;
+  workspace: string | null;
+  online: boolean;
+  lastSeenAt: string | null;
+  createdAt: string;
+};
+type LocalAgentJob = {
+  id: string;
+  agentId: string;
+  projectId?: string | null;
+  operation?: string;
+  command: string;
+  cwd: string;
+  status: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  changedFiles?: Array<{ path?: string; action?: string }>;
+  createdAt: string;
+  completedAt: string | null;
+};
+type LocalAgentDashboard = {
+  agents: LocalAgent[];
+  jobs: LocalAgentJob[];
+  connected: boolean;
+  error?: string;
 };
 
 const mcpTemplates = [
@@ -203,7 +291,7 @@ function McpBrandMark({ id, name }: { id: string; name: string }) {
   const asset = mcpBrandAssets[brandId];
   return (
     <span className={`mcp-service-mark ${asset ? "has-brand-logo" : "is-fallback"}`} aria-hidden="true">
-      {asset ? <img src={asset} alt="" draggable={false} /> : name.slice(0, 1).toUpperCase()}
+      {asset ? <Image src={asset} width={32} height={32} unoptimized alt="" draggable={false} /> : name.slice(0, 1).toUpperCase()}
     </span>
   );
 }
@@ -211,6 +299,27 @@ function McpBrandMark({ id, name }: { id: string; name: string }) {
 export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+  const [modelHandoffs, setModelHandoffs] = useState<ModelHandoff[]>([]);
+  const [sessionTitle, setSessionTitle] = useState("새 작업");
+  const [lastContextProvider, setLastContextProvider] = useState<string | null>(null);
+  const [recentSessions, setRecentSessions] = useState<ContextSession[]>([]);
+  const [contextLoading, setContextLoading] = useState(true);
+  const [failedContext, setFailedContext] = useState<ContextTarget | null>(null);
+  const latestContextRequest = useRef(0);
+  const activeConversation = useRef(0);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const [currentUser, setCurrentUser] = useState("owner");
+  const [sessionRole, setSessionRole] = useState<SessionRole>("owner");
+  const [sessionOwner, setSessionOwner] = useState("owner");
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamHandoffs, setTeamHandoffs] = useState<TeamHandoff[]>([]);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [teamBusy, setTeamBusy] = useState(false);
+  const [teamMessage, setTeamMessage] = useState("팀원을 초대하거나 편집 가능한 팀원에게 작업을 넘길 수 있어요.");
+  const [teamForm, setTeamForm] = useState<{ email: string; role: "editor" | "viewer"; note: string }>({ email: "", role: "editor", note: "" });
   const [isWorking, setIsWorking] = useState(false);
   const [sparks, setSparks] = useState(100000);
   const [growth, setGrowth] = useState(0);
@@ -238,18 +347,77 @@ export default function Home() {
   const [mcpCategory, setMcpCategory] = useState("전체");
   const [mcpSetupId, setMcpSetupId] = useState<string | null>(null);
   const [mcpCredentials, setMcpCredentials] = useState({ clientId: "", clientSecret: "" });
+  const [localAgentOpen, setLocalAgentOpen] = useState(false);
+  const [localAgents, setLocalAgents] = useState<LocalAgent[]>([]);
+  const [localAgentJobs, setLocalAgentJobs] = useState<LocalAgentJob[]>([]);
+  const [localAgentBusy, setLocalAgentBusy] = useState(false);
+  const [localAgentName, setLocalAgentName] = useState("내 컴퓨터");
+  const [localAgentToken, setLocalAgentToken] = useState<string | null>(null);
+  const [localAgentPlatform, setLocalAgentPlatform] = useState<"windows" | "mac">("windows");
+  const [localAgentNote, setLocalAgentNote] = useState("연결 후 채팅에서 파일 수정·빌드·테스트를 요청할 수 있어요.");
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [projectTab, setProjectTab] = useState<"overview" | "files" | "changes">("overview");
+  const [projectEditingId, setProjectEditingId] = useState<string | null>(null);
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [projectNote, setProjectNote] = useState("컴퓨터와 폴더를 연결하면 모델이 프로젝트 안에서만 작업합니다.");
+  const [projectForm, setProjectForm] = useState({ name: "", description: "", agentId: "", rootPath: ".", instructions: "", modelPreference: "latest" as ModelPreference, fileAccess: "read-write" as "read-only" | "read-write", commandAccess: "approval" as "disabled" | "approval" });
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [projectFile, setProjectFile] = useState<ProjectDocument | null>(null);
+  const [projectFileContent, setProjectFileContent] = useState("");
+  const [projectFilePath, setProjectFilePath] = useState("");
+  const [projectSearchQuery, setProjectSearchQuery] = useState("");
+  const [projectSearchResults, setProjectSearchResults] = useState<ProjectSearchMatch[]>([]);
+  const [projectDiff, setProjectDiff] = useState({ status: "", diff: "", staged: "" });
+  const [projectActivities, setProjectActivities] = useState<ProjectActivity[]>([]);
   const [modelPreference, setModelPreference] = useState<ModelPreference>("latest");
   const [registryStatus, setRegistryStatus] = useState<RegistryStatus | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuCloseRef = useRef<HTMLButtonElement>(null);
   const [ready, setReady] = useState(false);
   const [gardenNote, setGardenNote] = useState("정원은 아직 비어 있어요. 스토어에서 첫 잔디를 심어보세요.");
   const gardenCanvasRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (!mobileMenu) return;
+    menuCloseRef.current?.focus();
+    function handleResize() {
+      if (!menuTriggerRef.current?.getClientRects().length) setMobileMenu(false);
+    }
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [mobileMenu]);
+
+  function dismissNavigation() {
+    if (!mobileMenu) return;
+    setMobileMenu(false);
+    menuTriggerRef.current?.focus();
+  }
+
+  function handleNavigationKey(event: KeyboardEvent<HTMLElement>) {
+    if (!mobileMenu) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissNavigation();
+    } else if (event.key === "Tab") {
+      const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+  }
+
   /* eslint-disable react-hooks/set-state-in-effect -- browser-persisted owner preferences hydrate once after mount */
   useEffect(() => {
     const savedPreference = window.localStorage.getItem("terracotta-model-preference");
-    if (savedPreference === "latest" || savedPreference === "gpt" || savedPreference === "claude") {
+    if (savedPreference === "latest" || savedPreference === "gpt" || savedPreference === "claude" || savedPreference === "gemini") {
       setModelPreference(savedPreference);
     }
     const saved = window.localStorage.getItem("terracotta-garden-v3");
@@ -333,10 +501,103 @@ export default function Home() {
     void fetch("/api/model-registry", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preference: modelPreference }) }).catch(() => undefined);
   }, [modelPreference, ready]);
 
-  useEffect(() => {
-    if (!ready) return;
+  const loadInitialData = useEffectEvent(() => {
     void loadRegistry();
+    void loadWorkContext();
+  });
+
+  useEffect(() => {
+    if (ready) loadInitialData();
   }, [ready]);
+
+  function applyContextPayload(payload: ContextPayload, replaceMessages = true) {
+    setCurrentUser(payload.currentUser || "owner");
+    setProjects(payload.projects ?? []);
+    setProjectId(payload.session?.projectId ?? payload.selectedProjectId ?? null);
+    setSessionId(payload.session?.id ?? null);
+    setSessionTitle(payload.session?.title ?? "새 작업");
+    setSessionOwner(payload.session?.ownerEmail ?? payload.currentUser ?? "owner");
+    setSessionRole(payload.session?.role ?? "owner");
+    setLastContextProvider(payload.session?.lastProvider ?? null);
+    if (replaceMessages) setMessages(payload.messages ?? []);
+    setTeamMembers(payload.members ?? []);
+    setTeamHandoffs(payload.handoffs ?? []);
+    setModelHandoffs(payload.modelHandoffs ?? []);
+    setRecentSessions(payload.recentSessions ?? []);
+    const selected = (payload.projects ?? []).find((project) => project.id === (payload.session?.projectId ?? payload.selectedProjectId));
+    if (selected) setModelPreference(selected.modelPreference);
+  }
+
+  async function loadWorkContext(target: ContextTarget = {}) {
+    const request = ++latestContextRequest.current;
+    setContextLoading(true);
+    setFailedContext(null);
+    dismissNavigation();
+    try {
+      const params = new URLSearchParams();
+      if (target.sessionId) params.set("sessionId", target.sessionId);
+      else if (target.projectId) params.set("projectId", target.projectId);
+      const query = params.size ? `?${params.toString()}` : "";
+      const response = target.create
+        ? await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "new", projectId: target.projectId }) })
+        : await fetch(`/api/context${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("context unavailable");
+      const payload = await response.json() as ContextPayload;
+      if (request !== latestContextRequest.current) return;
+      activeConversation.current++;
+      setIsWorking(false);
+      applyContextPayload(payload);
+      if (target.create) setPrompt("");
+    } catch {
+      if (request === latestContextRequest.current) setFailedContext(target);
+    } finally {
+      if (request === latestContextRequest.current) setContextLoading(false);
+    }
+  }
+
+  async function runTeamAction(body: Record<string, unknown>) {
+    if (!sessionId || teamBusy) return null;
+    const conversation = activeConversation.current;
+    setTeamBusy(true);
+    try {
+      const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, sessionId }) });
+      const payload = await response.json() as ContextPayload;
+      if (conversation !== activeConversation.current) return null;
+      if (!response.ok) throw new Error(payload.error || "팀 공유 설정을 저장하지 못했어요.");
+      applyContextPayload(payload);
+      return payload;
+    } catch (error) {
+      setTeamMessage(error instanceof Error ? error.message : "팀 공유 설정을 저장하지 못했어요.");
+      return null;
+    } finally {
+      setTeamBusy(false);
+    }
+  }
+
+  async function submitTeamShare(event: FormEvent) {
+    event.preventDefault();
+    if (!teamForm.email.trim()) return;
+    const action = sessionRole === "owner" ? "share" : "handoff";
+    const payload = await runTeamAction({ action, email: teamForm.email, role: teamForm.role, note: teamForm.note });
+    if (!payload) return;
+    setTeamMessage(sessionRole === "owner"
+      ? (teamForm.note.trim() && teamForm.role === "editor" ? "팀원을 초대하고 작업 인계 메모를 남겼어요." : "팀원의 공유 권한을 저장했어요.")
+      : "팀원에게 작업을 넘겼어요.");
+    setTeamForm({ email: "", role: "editor", note: "" });
+  }
+
+  async function revokeTeamMember(email: string) {
+    const payload = await runTeamAction({ action: "revoke", email });
+    if (payload) setTeamMessage(`${email}의 공유 권한을 해제했어요.`);
+  }
+
+  async function acceptHandoff(handoffId: string) {
+    const payload = await runTeamAction({ action: "accept", handoffId });
+    if (payload) {
+      setTeamMessage("작업을 이어받았어요. 같은 기록에서 바로 계속할 수 있습니다.");
+      setTeamOpen(false);
+    }
+  }
 
   async function loadRegistry(refresh = false) {
     setRegistryLoading(true);
@@ -361,7 +622,7 @@ export default function Home() {
   function openModelLab() {
     setModelLabOpen(true);
     setSettingsOpen(false);
-    setMobileMenu(false);
+    dismissNavigation();
     if (!modelInsights) void loadModelInsights();
   }
 
@@ -379,9 +640,237 @@ export default function Home() {
     }
   }
 
+  async function loadLocalAgents() {
+    setLocalAgentBusy(true);
+    try {
+      const response = await fetch("/api/local-agent", { cache: "no-store" });
+      const payload = await response.json() as LocalAgentDashboard;
+      if (!response.ok) throw new Error(payload.error || "로컬 연결을 불러오지 못했어요.");
+      setLocalAgents(payload.agents ?? []);
+      setLocalAgentJobs(payload.jobs ?? []);
+      if (payload.connected) setLocalAgentNote("로컬 터미널이 온라인입니다. 채팅에서 필요한 작업을 요청하세요.");
+    } catch (error) {
+      setLocalAgentNote(error instanceof Error ? error.message : "로컬 연결을 불러오지 못했어요.");
+    } finally {
+      setLocalAgentBusy(false);
+    }
+  }
+
+  function openLocalAgent() {
+    setLocalAgentOpen(true);
+    dismissNavigation();
+    void loadLocalAgents();
+  }
+
+  async function pairLocalAgent() {
+    if (localAgentBusy) return;
+    setLocalAgentBusy(true);
+    try {
+      const response = await fetch("/api/local-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "pair", name: localAgentName }),
+      });
+      const payload = await response.json() as { token?: string; error?: string };
+      if (!response.ok || !payload.token) throw new Error(payload.error || "연결 키를 만들지 못했어요.");
+      setLocalAgentToken(payload.token);
+      setLocalAgentNote("한 번만 표시되는 연결 키를 만들었어요. 아래 명령을 연결할 컴퓨터에서 실행하세요.");
+      await loadLocalAgents();
+    } catch (error) {
+      setLocalAgentNote(error instanceof Error ? error.message : "연결 키를 만들지 못했어요.");
+    } finally {
+      setLocalAgentBusy(false);
+    }
+  }
+
+  async function revokeLocalAgent(id: string) {
+    setLocalAgentBusy(true);
+    try {
+      const response = await fetch("/api/local-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "revoke", id }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "연결을 해제하지 못했어요.");
+      setLocalAgentNote("해당 컴퓨터의 연결 키와 대기 작업을 해제했어요.");
+      await loadLocalAgents();
+    } catch (error) {
+      setLocalAgentNote(error instanceof Error ? error.message : "연결을 해제하지 못했어요.");
+    } finally {
+      setLocalAgentBusy(false);
+    }
+  }
+
+  function formForProject(project?: WorkspaceProject | null) {
+    return project ? {
+      name: project.name,
+      description: project.description,
+      agentId: project.agentId ?? "",
+      rootPath: project.rootPath,
+      instructions: project.instructions,
+      modelPreference: project.modelPreference,
+      fileAccess: project.fileAccess,
+      commandAccess: project.commandAccess,
+    } : { name: "", description: "", agentId: localAgents.find((agent) => agent.online)?.id ?? "", rootPath: ".", instructions: "", modelPreference: "latest" as ModelPreference, fileAccess: "read-write" as const, commandAccess: "approval" as const };
+  }
+
+  async function loadProjectDetails(targetProjectId: string) {
+    setProjectBusy(true);
+    try {
+      const response = await fetch(`/api/projects?projectId=${encodeURIComponent(targetProjectId)}`, { cache: "no-store" });
+      const payload = await response.json() as { projects?: WorkspaceProject[]; project?: WorkspaceProject; agents?: LocalAgent[]; activities?: ProjectActivity[]; error?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 불러오지 못했어요.");
+      setProjects(payload.projects ?? []);
+      setLocalAgents(payload.agents ?? []);
+      setProjectActivities(payload.activities ?? []);
+      setProjectEditingId(payload.project.id);
+      setProjectForm(formForProject(payload.project));
+    } catch (error) {
+      setProjectNote(error instanceof Error ? error.message : "프로젝트를 불러오지 못했어요.");
+    } finally {
+      setProjectBusy(false);
+    }
+  }
+
+  function openProjectWorkspace(targetProjectId: string | null = projectId, tab: "overview" | "files" | "changes" = "overview") {
+    setProjectOpen(true);
+    setProjectTab(tab);
+    dismissNavigation();
+    setProjectFile(null);
+    setProjectFileContent("");
+    setProjectSearchResults([]);
+    if (targetProjectId) void loadProjectDetails(targetProjectId);
+    else {
+      setProjectEditingId(null);
+      setProjectForm(formForProject(null));
+      setProjectActivities([]);
+      void loadLocalAgents();
+    }
+  }
+
+  async function saveProject(event: FormEvent) {
+    event.preventDefault();
+    if (!projectForm.name.trim() || projectBusy) return;
+    setProjectBusy(true);
+    try {
+      const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: projectEditingId ? "update" : "create", projectId: projectEditingId, ...projectForm }),
+      });
+      const payload = await response.json() as { project?: WorkspaceProject; error?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 저장하지 못했어요.");
+      setProjectEditingId(payload.project.id);
+      setProjectId(payload.project.id);
+      setProjectForm(formForProject(payload.project));
+      setProjects((items) => [payload.project!, ...items.filter((item) => item.id !== payload.project!.id)]);
+      setModelPreference(payload.project.modelPreference);
+      setProjectNote("프로젝트 설정을 저장했어요. 이제 이 프로젝트의 대화와 파일 작업이 한곳에 모입니다.");
+      await loadWorkContext({ projectId: payload.project.id });
+    } catch (error) {
+      setProjectNote(error instanceof Error ? error.message : "프로젝트를 저장하지 못했어요.");
+    } finally {
+      setProjectBusy(false);
+    }
+  }
+
+  async function archiveProject() {
+    if (!projectEditingId || projectBusy) return;
+    setProjectBusy(true);
+    try {
+      const response = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "archive", projectId: projectEditingId }) });
+      if (!response.ok) throw new Error("프로젝트를 보관하지 못했어요.");
+      setProjects((items) => items.filter((item) => item.id !== projectEditingId));
+      if (projectId === projectEditingId) setProjectId(null);
+      setProjectEditingId(null);
+      setProjectForm(formForProject(null));
+      setProjectNote("프로젝트를 보관했어요. 대화와 실행 기록은 삭제하지 않았습니다.");
+    } catch (error) {
+      setProjectNote(error instanceof Error ? error.message : "프로젝트를 보관하지 못했어요.");
+    } finally {
+      setProjectBusy(false);
+    }
+  }
+
+  async function projectFileRequest(action: "list" | "read" | "search" | "diff" | "write", input: Record<string, unknown> = {}) {
+    if (!projectEditingId) throw new Error("프로젝트를 먼저 선택해 주세요.");
+    const response = await fetch("/api/projects/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: projectEditingId, action, ...input }) });
+    const payload = await response.json() as { output?: unknown; job?: { status?: string; stderr?: string }; error?: string };
+    if (!response.ok && response.status !== 202) throw new Error(payload.error || payload.job?.stderr || "로컬 파일 작업을 처리하지 못했어요.");
+    if (response.status === 202) setProjectNote("로컬 컴퓨터에서 작업 중입니다. 잠시 뒤 다시 확인해 주세요.");
+    return payload.output;
+  }
+
+  async function loadProjectFiles() {
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("list", { path: ".", maxDepth: 6 }) as { files?: ProjectFile[] } | null;
+      setProjectFiles(output?.files ?? []);
+      setProjectNote(`${output?.files?.length ?? 0}개 파일과 폴더를 안전 범위 안에서 불러왔어요.`);
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "파일 목록을 불러오지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  async function openProjectFile(path: string) {
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("read", { path }) as ProjectDocument | null;
+      if (!output?.path) throw new Error("파일 내용을 받지 못했어요.");
+      setProjectFile(output); setProjectFileContent(output.content); setProjectFilePath(output.path);
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "파일을 열지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  function newProjectFile() {
+    const path = projectFilePath.trim();
+    if (!path) { setProjectNote("새 파일의 프로젝트 기준 경로를 먼저 입력해 주세요."); return; }
+    setProjectFile({ path, content: "", hash: "", size: 0, modifiedAt: "" });
+    setProjectFileContent("");
+  }
+
+  async function saveProjectFile() {
+    if (!projectFile || projectBusy) return;
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("write", { path: projectFile.path, content: projectFileContent, expectedHash: projectFile.hash || undefined, confirmed: true }) as { path?: string; hash?: string } | null;
+      setProjectFile((current) => current ? { ...current, content: projectFileContent, hash: output?.hash ?? current.hash, size: new TextEncoder().encode(projectFileContent).length } : current);
+      setProjectNote(`${output?.path ?? projectFile.path} 저장을 완료했어요. 변경 기록에도 남겼습니다.`);
+      await loadProjectFiles();
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "파일을 저장하지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  async function searchProjectFiles(event: FormEvent) {
+    event.preventDefault();
+    if (!projectSearchQuery.trim()) return;
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("search", { query: projectSearchQuery, maxResults: 60 }) as { matches?: ProjectSearchMatch[] } | null;
+      setProjectSearchResults(output?.matches ?? []);
+      setProjectNote(`${output?.matches?.length ?? 0}개 검색 결과를 찾았어요.`);
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "프로젝트 검색을 마치지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  async function loadProjectChanges() {
+    setProjectBusy(true);
+    try {
+      const output = await projectFileRequest("diff") as { status?: string; diff?: string; staged?: string } | null;
+      setProjectDiff({ status: output?.status ?? "", diff: output?.diff ?? "", staged: output?.staged ?? "" });
+      await loadProjectDetails(projectEditingId!);
+    } catch (error) { setProjectNote(error instanceof Error ? error.message : "변경 내역을 불러오지 못했어요."); }
+    finally { setProjectBusy(false); }
+  }
+
+  async function selectProject(targetProjectId: string) {
+    setProjectOpen(false);
+    await loadWorkContext({ projectId: targetProjectId });
+  }
+
   function openMcpHub() {
     setMcpOpen(true);
-    setMobileMenu(false);
+    dismissNavigation();
     void loadMcp();
   }
 
@@ -459,13 +948,19 @@ export default function Home() {
   }
 
   const routingOrder = useMemo(() => {
-    if (modelPreference === "claude") return { primary: registryStatus?.models.find((model) => model.provider === "anthropic")?.name ?? "Claude Fable 5", backup: "GPT-5.6" };
-    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "anthropic") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "openai")?.name ?? "GPT" };
-    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "openai") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "anthropic")?.name ?? "Claude" };
-    return { primary: "GPT-5.6", backup: "Claude Sonnet 5" };
+    const gemini = registryStatus?.models.find((model) => model.provider === "google")?.name ?? "Gemini 4 Hydrogen";
+    const gpt = registryStatus?.models.find((model) => model.provider === "openai")?.name ?? "GPT-6.2 Sol";
+    if (modelPreference === "gemini") return { primary: gemini, backup: gpt };
+    if (modelPreference === "claude") return { primary: registryStatus?.models.find((model) => model.provider === "anthropic")?.name ?? "Claude Fable 5.2", backup: gemini };
+    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "anthropic") return { primary: registryStatus.latestPrimary.model, backup: gemini };
+    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "google") return { primary: registryStatus.latestPrimary.model, backup: gpt };
+    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "openai") return { primary: registryStatus.latestPrimary.model, backup: gemini };
+    return { primary: gpt, backup: gemini };
   }, [modelPreference, registryStatus]);
 
-  const preferenceLabel = modelPreference === "latest" ? "최신 우선" : modelPreference === "gpt" ? "GPT 우선" : "Claude 우선";
+  const preferenceLabel = modelPreference === "latest" ? "최신 우선" : modelPreference === "gpt" ? "GPT 우선" : modelPreference === "claude" ? "Claude 우선" : "Gemini 우선";
+  const activeProject = projects.find((project) => project.id === projectId) ?? null;
+  const visibleRecentSessions = recentSessions.filter((session) => activeProject ? session.projectId === activeProject.id : !session.projectId);
 
   const selectedTeam = useMemo(() => {
     const text = prompt.toLowerCase();
@@ -485,22 +980,42 @@ export default function Home() {
   const gardenCategories = useMemo(() => ["전체", ...Array.from(new Set(gardenShop.map((item) => item.category)))], []);
   const visibleGardenItems = useMemo(() => gardenShop.filter((item) => shopCategory === "전체" || item.category === shopCategory), [shopCategory]);
   const visibleModelInsights = useMemo(() => (modelInsights?.models ?? []).filter((model) => modelInsightFilter === "전체" || model.categories.includes(modelInsightFilter)), [modelInsightFilter, modelInsights]);
+  const localAgentOrigin = ready && typeof window !== "undefined" ? window.location.origin : "https://your-terracotta.example";
+  const localAgentCommand = localAgentToken
+    ? localAgentPlatform === "windows"
+      ? `Invoke-WebRequest "${localAgentOrigin}/terracotta-local-agent.mjs" -OutFile ".\\terracotta-local-agent.mjs"\nnode .\\terracotta-local-agent.mjs --server "${localAgentOrigin}" --token "${localAgentToken}" --workspace .`
+      : `curl -fsSL "${localAgentOrigin}/terracotta-local-agent.mjs" -o terracotta-local-agent.mjs\nnode ./terracotta-local-agent.mjs --server "${localAgentOrigin}" --token "${localAgentToken}" --workspace .`
+    : "";
   const mcpCategories = useMemo(() => ["전체", ...Array.from(new Set(mcpConnections.map((item) => item.category)))], [mcpConnections]);
   const visibleMcpConnections = useMemo(() => {
     const query = mcpQuery.trim().toLowerCase();
     return mcpConnections.filter((item) => (mcpCategory === "전체" || item.category === mcpCategory) && (!query || `${item.name} ${item.note} ${item.category}`.toLowerCase().includes(query)));
   }, [mcpCategory, mcpConnections, mcpQuery]);
   const setupConnection = mcpConnections.find((item) => item.id === mcpSetupId) ?? null;
+  const canEditSession = sessionRole !== "viewer";
+  const canSubmitTask = canEditSession && !contextLoading && !failedContext && !isWorking;
+  const pendingTeamHandoff = teamHandoffs.find((handoff) => handoff.status === "pending" && handoff.toEmail === currentUser) ?? null;
+  const handoffTargets = teamMembers.filter((member) => member.email !== currentUser && (member.role === "owner" || member.role === "editor"));
 
   function assistantGuidance(payload: AssistantPayload) {
     if (payload.code === "HIGGSFIELD_MCP_AUTH_REQUIRED") return "이미지·영상 생성 MCP를 연결하면 창작 요청도 자동 실행할 수 있어요.";
-    if (payload.code === "PROVIDER_KEY_REQUIRED") return "오케스트레이터는 준비됐어요. OpenAI, Anthropic 또는 Perplexity API 키를 연결하면 실제 작업을 시작합니다.";
+    if (payload.code === "PROVIDER_KEY_REQUIRED") return "오케스트레이터는 준비됐어요. OpenAI, Anthropic, Gemini 또는 Perplexity API 키를 연결하면 실제 작업을 시작합니다.";
     if (payload.code === "BUDGET_EXHAUSTED") return "이번 달 공급사 원가 예산에 도달했어요. 예산을 조정한 뒤 다시 시도해 주세요.";
     return payload.error ?? "연결된 모델이나 도구가 잠시 응답하지 않았어요.";
   }
 
   function addAssistantResult(payload: AssistantPayload, fallbackModel: string) {
     const trace = payload.orchestration?.trace ?? [];
+    if (payload.context) {
+      setSessionId(payload.context.sessionId);
+      setProjectId(payload.context.projectId);
+      setSessionTitle(payload.context.title);
+      setLastContextProvider(payload.context.lastProvider);
+      setRecentSessions((items) => [
+        { ...items.find((item) => item.id === payload.context!.sessionId), id: payload.context!.sessionId, projectId: payload.context!.projectId, title: payload.context!.title, lastProvider: payload.context!.lastProvider },
+        ...items.filter((item) => item.id !== payload.context!.sessionId),
+      ].slice(0, 8));
+    }
     if (payload.approvalRequired && payload.approval) {
       setMessages((items) => [...items, {
         role: "assistant",
@@ -529,33 +1044,39 @@ export default function Home() {
   async function submitTask(event: FormEvent) {
     event.preventDefault();
     const task = prompt.trim();
-    if (!task || isWorking) return;
+    if (!task || !canSubmitTask) return;
+    const conversation = activeConversation.current;
     const team = selectedTeam;
     setMessages((items) => [...items, { role: "user", text: task }]);
     setPrompt("");
     setIsWorking(true);
     try {
-      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference }) });
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference, sessionId, projectId }) });
       const payload = await response.json() as AssistantPayload;
+      if (conversation !== activeConversation.current) return;
       if (!response.ok) {
-        setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "연결 설정 필요" }]);
+        setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "요청 실패", retryPrompt: task }]);
         return;
       }
       addAssistantResult(payload, team);
     } catch {
-      setMessages((items) => [...items, { role: "assistant", text: "실제 모델 백엔드에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.", models: "연결 오류" }]);
+      if (conversation === activeConversation.current) {
+        setMessages((items) => [...items, { role: "assistant", text: "모델에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.", models: "연결 오류", retryPrompt: task }]);
+      }
     } finally {
-      setIsWorking(false);
+      if (conversation === activeConversation.current) setIsWorking(false);
     }
   }
 
   async function resolveToolApproval(approval: ApprovalRequest, decision: "approve" | "reject") {
-    if (isWorking || approval.status === "approved" || approval.status === "rejected") return;
+    if (!canSubmitTask || approval.status === "approved" || approval.status === "rejected") return;
+    const conversation = activeConversation.current;
     setIsWorking(true);
     setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "running" } } : message));
     try {
       const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approvalId: approval.id, decision }) });
       const payload = await response.json() as AssistantPayload;
+      if (conversation !== activeConversation.current) return;
       if (!response.ok) {
         setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "pending" } } : message));
         setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "승인 처리 오류" }]);
@@ -564,14 +1085,21 @@ export default function Home() {
       setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: decision === "approve" ? "approved" : "rejected" } } : message));
       addAssistantResult(payload, "Terracotta Auto");
     } catch {
+      if (conversation !== activeConversation.current) return;
       setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "pending" } } : message));
       setMessages((items) => [...items, { role: "assistant", text: "승인 요청을 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.", models: "연결 오류" }]);
     } finally {
-      setIsWorking(false);
+      if (conversation === activeConversation.current) setIsWorking(false);
     }
   }
 
+  function fillComposer(text: string) {
+    setPrompt(text);
+    composerRef.current?.focus();
+  }
+
   function handleComposerKey(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
@@ -691,127 +1219,188 @@ export default function Home() {
     return { left: `${position.x}%`, top: `${position.y}%`, zIndex: Math.round(2 + position.y / 10) };
   }
 
-  function newChat() {
-    setMessages([]);
-    setPrompt("");
-    setMobileMenu(false);
+  function newChat(targetProjectId: string | null = projectId) {
+    return loadWorkContext({ create: true, projectId: targetProjectId });
   }
+
+  const workContextBar = (
+    <div className="context-bridge" aria-label="모델 공용 작업 기억">
+      <div className="context-bridge-copy">
+        <i />
+        <span><b aria-live="polite">{contextLoading ? "대화를 여는 중…" : activeProject ? `${activeProject.name} / ${sessionTitle}` : sessionTitle}</b><small>{pendingTeamHandoff
+          ? `${pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요`
+          : teamMembers.length > 1
+            ? `팀 작업 · ${teamMembers.length}명 · ${sessionRole === "viewer" ? "보기 전용" : "편집 가능"}`
+            : lastContextProvider
+              ? `${lastContextProvider === "openai" ? "GPT" : lastContextProvider === "anthropic" ? "Claude" : lastContextProvider === "google" ? "Gemini" : "Perplexity"}에서 이어갈 준비됨`
+              : modelHandoffs.length
+                ? `모델 컨텍스트 인계 ${modelHandoffs.length}회 · 같은 프로젝트 기억 사용`
+                : "GPT, Claude, Gemini가 같은 작업 기록을 사용해요"}</small></span>
+      </div>
+      <div className="context-bridge-actions">
+        <button type="button" disabled={!canEditSession} className={modelPreference === "gpt" ? "active" : ""} onClick={() => setModelPreference("gpt")}>GPT로 이어하기</button>
+        <button type="button" disabled={!canEditSession} className={modelPreference === "claude" ? "active" : ""} onClick={() => setModelPreference("claude")}>Claude로 이어하기</button>
+        <button type="button" disabled={!canEditSession} className={modelPreference === "gemini" ? "active" : ""} onClick={() => setModelPreference("gemini")}>Gemini로 이어하기</button>
+        <button type="button" className={pendingTeamHandoff ? "attention" : ""} onClick={() => setTeamOpen(true)}>팀 공유{teamMembers.length > 1 ? ` ${teamMembers.length}` : ""}</button>
+        <button type="button" onClick={() => void newChat()}>새 작업</button>
+      </div>
+    </div>
+  );
 
   return (
     <main className="app-frame">
-      <aside className={`sidebar ${mobileMenu ? "open" : ""}`}>
+      <aside id="workspace-navigation" aria-label="작업실 메뉴" onKeyDown={handleNavigationKey} className={`sidebar ${mobileMenu ? "open" : ""}`}>
         <div className="sidebar-top">
-          <button className="wordmark" onClick={newChat} aria-label="테라코타 홈">
+          <button className="wordmark" onClick={() => void newChat()} aria-label="테라코타 홈">
             <TerracottaMark /> Terracotta
           </button>
-          <button className="sidebar-close" onClick={() => setMobileMenu(false)} aria-label="메뉴 닫기">×</button>
+          <button className="sidebar-close" ref={menuCloseRef} onClick={dismissNavigation} aria-label="메뉴 닫기">×</button>
         </div>
 
-        <button className="new-chat" onClick={newChat}><span>＋</span> 새 대화</button>
+        <button className="new-chat" onClick={() => void newChat()}><span>＋</span> {activeProject ? `${activeProject.name} 새 대화` : "새 대화"}</button>
 
         <nav className="sidebar-nav" aria-label="주요 메뉴">
-          <button className="active" onClick={() => setMobileMenu(false)}><span>○</span> 대화</button>
-          <button onClick={() => { setGardenOpen(true); setMobileMenu(false); }}><span>♧</span> 테라코타 가든</button>
-          <button onClick={openMcpHub}><span>⌁</span> MCP 연결</button>
-          <button onClick={openModelLab}><span>◫</span> 모델 연구소</button>
-          <button onClick={() => { setSettingsOpen(true); setMobileMenu(false); }}><span>⌘</span> 모델 및 구독</button>
+          <button className="active" onClick={dismissNavigation}><PixelIcon name="chat" /> 대화</button>
+          <button onClick={() => openProjectWorkspace()}><PixelIcon name="folder" /> 프로젝트</button>
+          <button onClick={() => { setGardenOpen(true); dismissNavigation(); }}><PixelIcon name="sprout" /> 테라코타 가든</button>
+          <button onClick={openMcpHub}><PixelIcon name="link" /> MCP 연결</button>
+          <button onClick={openLocalAgent}><PixelIcon name="terminal" /> 로컬 터미널</button>
+          <button onClick={openModelLab}><PixelIcon name="chart" /> 모델 연구소</button>
+          <button onClick={() => { setSettingsOpen(true); dismissNavigation(); }}><PixelIcon name="sliders" /> 모델 및 구독</button>
         </nav>
 
+        <div className="project-sidebar">
+          <div><p>프로젝트</p><button onClick={() => openProjectWorkspace(null)} aria-label="새 프로젝트">＋</button></div>
+          <button className={!activeProject ? "active" : ""} onClick={() => void newChat(null)}><i style={{ background: "#b8b8b1" }} />일반 대화</button>
+          {projects.slice(0, 6).map((project) => (
+            <button className={project.id === projectId ? "active" : ""} key={project.id} onClick={() => void selectProject(project.id)}><i style={{ background: project.color }} />{project.name}<small>{project.agentId ? "local" : "chat"}</small></button>
+          ))}
+        </div>
+
         <div className="recents">
-          <p>최근 대화</p>
-          <button>이번 주 업무 정리</button>
-          <button>신제품 아이디어</button>
-          <button>영상 콘티 초안</button>
+          <p>{activeProject ? `${activeProject.name} 대화` : "일반 대화"}</p>
+          {visibleRecentSessions.length ? visibleRecentSessions.map((session) => (
+            <button className={session.id === sessionId ? "active" : ""} aria-current={session.id === sessionId ? "page" : undefined} key={session.id} onClick={() => void loadWorkContext({ sessionId: session.id })}>{session.title}{session.role && session.role !== "owner" ? " · 공유됨" : ""}</button>
+          )) : <small>{contextLoading ? "기억을 불러오는 중…" : "이 프로젝트에 아직 대화가 없어요."}</small>}
         </div>
 
         <div className="sidebar-account">
-          <span>LK</span>
+          <span className="account-sprout" aria-hidden="true"><PixelIcon name="sprout" /></span>
           <div><b>내 테라코타</b><small>{sparks.toLocaleString()} Sparks</small></div>
-          <button aria-label="계정 메뉴">•••</button>
+          <button onClick={() => { setSettingsOpen(true); dismissNavigation(); }} aria-label="모델 및 구독 설정 열기">•••</button>
         </div>
       </aside>
 
-      {mobileMenu && <button className="sidebar-scrim" onClick={() => setMobileMenu(false)} aria-label="메뉴 닫기" />}
+      {mobileMenu && <button className="sidebar-scrim" type="button" tabIndex={-1} onClick={dismissNavigation} aria-label="메뉴 닫기" />}
 
       <section className="chat-panel">
         <header className="chat-header">
-          <button className="mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="메뉴 열기">☰</button>
+          <button className="mobile-menu-button" ref={menuTriggerRef} onClick={() => setMobileMenu(true)} aria-expanded={mobileMenu} aria-controls="workspace-navigation" aria-label="메뉴 열기">☰</button>
           <button className="model-switch" onClick={() => setSettingsOpen(true)}>
-            Terracotta Auto · {preferenceLabel} <span>⌄</span>
+            <b className="model-brand-wide">Terracotta Auto</b><b className="model-brand-compact">자동</b> · {preferenceLabel} <span>⌄</span>
           </button>
-          <span className="private-state"><i /> 개인 메모리 켜짐</span>
+          <button className={`project-scope ${activeProject ? "active" : ""}`} onClick={() => openProjectWorkspace(activeProject?.id ?? null)}><i style={{ background: activeProject?.color ?? "#b8b8b1" }} />{activeProject?.name ?? "일반 대화"}<span>⌄</span></button>
+          <span className="private-state"><i /> GPT · Claude · Gemini 공용 기억</span>
+          <button className="mobile-garden" onClick={() => setGardenOpen(true)} aria-label="테라코타 가든 열기"><PixelIcon name="sprout" /></button>
         </header>
 
-        <div className={`conversation ${messages.length ? "has-messages" : ""}`}>
-          {messages.length === 0 ? (
-            <div className="empty-state">
-              <span className="hello-seed"><TerracottaMark size="large" /></span>
-              <h1>무엇을 도와드릴까요?</h1>
-              <p>필요한 모델은 제가 알아서 고를게요.</p>
+        <div className={`chat-body ${messages.length ? "" : "start-screen"}`}>
+          <div className={`conversation ${messages.length ? "has-messages" : ""}`}>
+            {messages.length === 0 ? (
+              <div className="empty-state">
+                <span className="hello-seed" aria-hidden="true" />
+                <h1>무엇을 도와드릴까요?</h1>
+                <p>필요한 모델은 제가 알아서 고를게요.</p>
+              </div>
+            ) : (
+              <div className="message-list" role="log" aria-label="대화 기록" aria-relevant="additions">
+                {messages.map((message, index) => (
+                  <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
+                    {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
+                    <div>
+                      {message.role === "user" && message.author && message.author !== currentUser && <small className="team-author">{message.author}</small>}
+                      <p>{message.text}</p>
+                      {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={`${step.status} ${step.type}`} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
+                      {message.approval && (
+                        <section className={`tool-approval ${message.approval.status ?? "pending"}`} aria-label="외부 작업 승인">
+                          <div className="tool-approval-head"><b>실행 전 확인</b><span>{message.approval.actions.length}개 작업</span></div>
+                          {message.approval.actions.map((action, actionIndex) => (
+                            <article key={`${action.service}-${action.tool}-${actionIndex}`}>
+                              <div><b>{action.service}</b><small>{action.tool}</small></div>
+                              <code>{JSON.stringify(action.arguments)}</code>
+                            </article>
+                          ))}
+                          <p>승인하면 위 내용 그대로 실행하며, 인자 변경은 허용하지 않아요.</p>
+                          <div className="tool-approval-actions">
+                            <button type="button" className="approve" disabled={!canSubmitTask || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
+                            <button type="button" disabled={!canSubmitTask || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
+                          </div>
+                        </section>
+                      )}
+                      {message.models && <small>{message.models}</small>}
+                      {message.retryPrompt && <button className="retry-prompt" type="button" onClick={() => fillComposer(message.retryPrompt!)}>질문 다시 편집</button>}
+                    </div>
+                  </article>
+                ))}
+                {isWorking && (
+                  <article className="message assistant thinking">
+                    <span className="assistant-seed"><TerracottaMark size="tiny" /></span>
+                    <div><p><i /><i /><i /></p><small>{selectedTeam}가 작업 중</small></div>
+                  </article>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="composer-wrap">
+            {failedContext && (
+              <div className="context-feedback" role="alert">
+                <span>{failedContext.create ? "새 대화를 만들지 못했어요." : "대화 기록을 불러오지 못했어요."}</span>
+                <button type="button" onClick={() => void loadWorkContext(failedContext)}>다시 시도</button>
+              </div>
+            )}
+            {messages.length > 0 && workContextBar}
+            <form className="composer" onSubmit={submitTask}>
+              <textarea
+                ref={composerRef}
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={handleComposerKey}
+                placeholder={canEditSession ? "테라코타에게 무엇이든 물어보세요" : "보기 전용 작업입니다"}
+                aria-label="테라코타에게 보낼 메시지"
+                disabled={!canEditSession}
+                rows={1}
+              />
+              <div className="composer-actions">
+                <div>
+                  <button type="button" aria-label="프로젝트 파일" onClick={() => openProjectWorkspace(activeProject?.id ?? null, activeProject ? "files" : "overview")}>＋</button>
+                  <button type="button" aria-label="웹 검색 요청 추가" title="웹 검색 요청 추가" onClick={() => fillComposer(prompt.trim() ? `${prompt.trimEnd()}\n웹에서 최신 자료를 찾아 출처와 함께 알려줘.` : "웹에서 최신 자료를 찾아 출처와 함께 알려줘. 주제는 ")}>◎</button>
+                </div>
+                <span>{selectedTeam}</span>
+                <button className="send-button" disabled={!prompt.trim() || !canSubmitTask} aria-label="메시지 보내기">↑</button>
+              </div>
+            </form>
+            <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
+            {messages.length === 0 && (
+              <details className="start-context">
+                <summary>{pendingTeamHandoff ? "팀 인계 확인" : "모델 전환 및 팀 공유"}</summary>
+                {workContextBar}
+              </details>
+            )}
+          </div>
+          {messages.length === 0 && (
+            <section className="prompt-shelf" aria-labelledby="prompt-heading">
+              <h2 id="prompt-heading">추천 질문</h2>
               <div className="quick-prompts">
-                {quickPrompts.map((item) => (
-                  <button key={item} onClick={() => setPrompt(item)}>{item}<span>↗</span></button>
+                {quickPrompts.map(({ title, prompt: suggestion, icon }) => (
+                  <button key={title} onClick={() => fillComposer(suggestion)}>
+                    <span className="prompt-title"><PixelIcon name={icon} />{title}</span>
+                    <span className="prompt-example">{suggestion}</span>
+                  </button>
                 ))}
               </div>
-            </div>
-          ) : (
-            <div className="message-list">
-              {messages.map((message, index) => (
-                <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
-                  {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
-                  <div>
-                    <p>{message.text}</p>
-                    {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={step.status} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
-                    {message.approval && (
-                      <section className={`tool-approval ${message.approval.status ?? "pending"}`} aria-label="외부 작업 승인">
-                        <div className="tool-approval-head"><b>실행 전 확인</b><span>{message.approval.actions.length}개 작업</span></div>
-                        {message.approval.actions.map((action, actionIndex) => (
-                          <article key={`${action.service}-${action.tool}-${actionIndex}`}>
-                            <div><b>{action.service}</b><small>{action.tool}</small></div>
-                            <code>{JSON.stringify(action.arguments)}</code>
-                          </article>
-                        ))}
-                        <p>승인하면 위 내용 그대로 실행하며, 인자 변경은 허용하지 않아요.</p>
-                        <div className="tool-approval-actions">
-                          <button type="button" className="approve" disabled={isWorking || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
-                          <button type="button" disabled={isWorking || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
-                        </div>
-                      </section>
-                    )}
-                    {message.models && <small>{message.models}{message.approval ? "" : "로 함께 작업함 · 가든 +1"}</small>}
-                  </div>
-                </article>
-              ))}
-              {isWorking && (
-                <article className="message assistant thinking">
-                  <span className="assistant-seed"><TerracottaMark size="tiny" /></span>
-                  <div><p><i /><i /><i /></p><small>{selectedTeam}가 작업 중</small></div>
-                </article>
-              )}
-            </div>
+            </section>
           )}
-        </div>
-
-        <div className="composer-wrap">
-          <form className="composer" onSubmit={submitTask}>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={handleComposerKey}
-              placeholder="테라코타에게 무엇이든 물어보세요"
-              aria-label="테라코타에게 보낼 메시지"
-              rows={1}
-            />
-            <div className="composer-actions">
-              <div>
-                <button type="button" aria-label="파일 첨부">＋</button>
-                <button type="button" aria-label="웹 검색">◎</button>
-              </div>
-              <span>{selectedTeam}</span>
-              <button className="send-button" disabled={!prompt.trim() || isWorking} aria-label="메시지 보내기">↑</button>
-            </div>
-          </form>
-          <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
         </div>
       </section>
 
@@ -829,19 +1418,77 @@ export default function Home() {
           </div>
           {decorations.map((placement) => {
               const item = gardenShop.find((entry) => entry.id === placement.itemId);
-              return item ? <img key={placement.instanceId} className={`mini-free-item size-${item.size}`} style={gardenPositionStyle(placement)} src={item.asset} alt="" draggable={false} /> : null;
+              return item ? <Image width={192} height={192} unoptimized key={placement.instanceId} className={`mini-free-item size-${item.size}`} style={gardenPositionStyle(placement)} src={item.asset} alt="" draggable={false} /> : null;
           })}
-          <img className="mini-character" style={gardenPositionStyle(characterPosition)} src={treeAssets[treeStage]} alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
+          <Image width={256} height={256} unoptimized loading="eager" className="mini-character" style={gardenPositionStyle(characterPosition)} src={treeAssets[treeStage]} alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
         </button>
         <div className="garden-rail-foot">
           <span>{fullLawn ? "잔디 한 판 완성" : `잔디 ${groundTiles.length}/20`}</span>
           <button onClick={() => setGardenOpen(true)}>가꾸기</button>
         </div>
+        <progress className="garden-progress" value={groundTiles.length} max={20} aria-label="심은 잔디" />
       </aside>
 
+      {teamOpen && (
+        <WorkspaceDialog label="팀 작업 공유" panelClass="team-dialog" onDismiss={() => setTeamOpen(false)}>
+            <button className="dialog-close" onClick={() => setTeamOpen(false)} aria-label="닫기">×</button>
+            <header><p>Team handoff</p><h2>같은 작업을 함께 키우기</h2><span>팀원도 같은 GPT·Claude·Gemini 기록과 도구 결과에서 바로 이어갈 수 있어요.</span></header>
+
+            {pendingTeamHandoff && (
+              <section className="incoming-handoff">
+                <div><b>{pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요</b><p>{pendingTeamHandoff.note}</p></div>
+                <button type="button" disabled={teamBusy} onClick={() => void acceptHandoff(pendingTeamHandoff.id)}>이어받기</button>
+              </section>
+            )}
+
+            <div className="team-access-note"><span>✓</span><p>초대한 이메일로 로그인한 팀원만 이 작업을 볼 수 있습니다. 현재 소유자 전용 사이트에서는 해당 팀원에게 사이트 접근 권한도 추가해야 해요.</p></div>
+
+            <section className="team-member-section">
+              <div className="team-section-head"><div><h3>함께 보는 사람</h3><p>{sessionOwner} 소유 · 현재 내 권한 {sessionRole === "owner" ? "소유자" : sessionRole === "editor" ? "편집" : "보기"}</p></div><b>{teamMembers.length}명</b></div>
+              <div className="team-member-list">
+                {teamMembers.map((member) => (
+                  <article key={member.email}>
+                    <span>{member.email.slice(0, 1).toUpperCase()}</span>
+                    <div><b>{member.email}</b><small>{member.role === "owner" ? "소유자" : member.role === "editor" ? "편집 가능" : "보기 전용"}</small></div>
+                    {sessionRole === "owner" && member.role !== "owner"
+                      ? <button type="button" disabled={teamBusy} onClick={() => void revokeTeamMember(member.email)}>해제</button>
+                      : member.email !== currentUser && member.role !== "viewer" && canEditSession
+                        ? <button type="button" onClick={() => setTeamForm((value) => ({ ...value, email: member.email, role: "editor" }))}>넘기기</button>
+                        : null}
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            {sessionRole !== "viewer" && (
+              <form className="team-share-form" onSubmit={submitTeamShare}>
+                <div className="team-section-head"><div><h3>{sessionRole === "owner" ? "팀원 초대 또는 인계" : "팀원에게 인계"}</h3><p>{sessionRole === "owner" ? "보기·편집 권한을 정하고, 선택적으로 인계 메모를 남기세요." : "편집 가능한 기존 팀원에게 현재 상태를 넘깁니다."}</p></div></div>
+                {sessionRole === "owner" ? (
+                  <div className="team-form-row">
+                    <label><span>팀원 이메일</span><input type="email" required value={teamForm.email} onChange={(event) => setTeamForm((value) => ({ ...value, email: event.target.value }))} placeholder="teammate@company.com" /></label>
+                    <label><span>권한</span><select value={teamForm.role} onChange={(event) => setTeamForm((value) => ({ ...value, role: event.target.value as "editor" | "viewer" }))}><option value="editor">편집 가능</option><option value="viewer">보기 전용</option></select></label>
+                  </div>
+                ) : (
+                  <label><span>넘겨받을 팀원</span><select required value={teamForm.email} onChange={(event) => setTeamForm((value) => ({ ...value, email: event.target.value }))}><option value="">팀원 선택</option>{handoffTargets.map((member) => <option value={member.email} key={member.email}>{member.email}</option>)}</select></label>
+                )}
+                <label><span>인계 메모 {sessionRole === "owner" ? "(선택)" : ""}</span><textarea value={teamForm.note} disabled={sessionRole === "owner" && teamForm.role === "viewer"} required={sessionRole !== "owner"} onChange={(event) => setTeamForm((value) => ({ ...value, note: event.target.value }))} placeholder={teamForm.role === "viewer" ? "보기 전용 팀원에게는 인계하지 않아요." : "지금까지 한 일과 다음에 할 일을 짧게 적어주세요."} rows={3} /></label>
+                <div className="team-form-actions"><p>{teamMessage}</p><button disabled={teamBusy || !teamForm.email.trim()}>{teamBusy ? "저장 중" : sessionRole === "owner" ? (teamForm.note.trim() && teamForm.role === "editor" ? "초대하고 넘기기" : "공유 저장") : "작업 넘기기"}</button></div>
+              </form>
+            )}
+
+            {sessionRole === "viewer" && <p className="viewer-note">보기 전용 팀원은 작업 기록을 확인할 수 있지만 모델 실행, 도구 승인, 다른 팀원 초대는 할 수 없어요.</p>}
+
+            {teamHandoffs.length > 0 && (
+              <section className="handoff-history">
+                <h3>최근 인계</h3>
+                {teamHandoffs.slice(0, 4).map((handoff) => <p key={handoff.id}><span>{handoff.fromEmail} → {handoff.toEmail}</span><b>{handoff.status === "accepted" ? "이어받음" : "대기 중"}</b></p>)}
+              </section>
+            )}
+        </WorkspaceDialog>
+      )}
+
       {gardenOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setGardenOpen(false)}>
-          <section className="dialog garden-dialog" role="dialog" aria-modal="true" aria-label="테라코타 가든" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="테라코타 가든" panelClass="garden-dialog" onDismiss={() => setGardenOpen(false)}>
             <button className="dialog-close" onClick={() => setGardenOpen(false)} aria-label="닫기">×</button>
             <header><p>Terracotta Garden</p><h2>내 지식 정원</h2><span>{gardenNote}</span></header>
             <p className="drag-help">잔디는 지면에 한 칸씩 심고, 장식과 테라 캐릭터는 타일과 상관없이 어디든 자유롭게 끌 수 있어요. 방향키로도 미세 조정됩니다.</p>
@@ -871,7 +1518,7 @@ export default function Home() {
                     onKeyDown={(event) => moveGardenItemWithKeyboard(event, "decoration", placement.instanceId)}
                     aria-label={`${item.name} 자유롭게 옮기기`}
                   >
-                    <img src={item.asset} alt="" draggable={false} />
+                    <Image src={item.asset} width={192} height={192} unoptimized alt="" draggable={false} />
                   </button>
                 );
               })}
@@ -883,7 +1530,7 @@ export default function Home() {
                 onKeyDown={(event) => moveGardenItemWithKeyboard(event, "character", "character")}
                 aria-label={`${selectedTree.name} 테라 캐릭터 자유롭게 옮기기`}
               >
-                <img src={treeAssets[treeStage]} alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
+                <Image src={treeAssets[treeStage]} width={256} height={256} unoptimized alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
               </button>
               <span className="free-drag-badge">자유 배치 · 1% 단위 저장</span>
             </div>
@@ -921,7 +1568,7 @@ export default function Home() {
                 const count = decorations.filter((placement) => placement.itemId === item.id).length;
                 return (
                   <button key={item.id} className={locked || lawnLocked ? "locked" : ""} disabled={locked || lawnLocked || sparks < item.cost} onClick={() => buyItem(item)}>
-                    <span className="shop-item-preview"><img src={item.asset} alt="" draggable={false} /></span><b>{item.name}</b><small>{locked ? `사용량 ${item.unlockAt}에 해금` : lawnLocked ? "잔디 한 판 완성 후 해금" : `${item.cost} S${count ? ` · 보유 ${count}` : ""}`}</small>
+                    <span className="shop-item-preview"><Image src={item.asset} width={192} height={192} unoptimized alt="" draggable={false} /></span><b>{item.name}</b><small>{locked ? `사용량 ${item.unlockAt}에 해금` : lawnLocked ? "잔디 한 판 완성 후 해금" : `${item.cost} S${count ? ` · 보유 ${count}` : ""}`}</small>
                   </button>
                 );
               })}
@@ -939,7 +1586,7 @@ export default function Home() {
                   <article key={item.id} className={selected ? "selected" : ""}>
                     <div className="tree-card-title"><div><b>{item.name}</b><small>{item.description}</small></div><span>{selected ? "사용 중" : owned ? "보유" : `${item.cost.toLocaleString()} S`}</span></div>
                     <div className="tree-stage-preview">
-                      {item.assets.map((asset, index) => <span key={asset} className={treeStage === index ? "current" : ""}><img src={asset} alt={`${item.name} ${treeStages[index]}`} draggable={false} /><small>{treeStages[index]}</small></span>)}
+                      {item.assets.map((asset, index) => <span key={asset} className={treeStage === index ? "current" : ""}><Image src={asset} width={256} height={256} unoptimized alt={`${item.name} ${treeStages[index]}`} draggable={false} /><small>{treeStages[index]}</small></span>)}
                     </div>
                     <button type="button" disabled={selected || (!owned && sparks < item.cost)} onClick={() => chooseTree(item)}>{selected ? "현재 나무" : owned ? "이 나무로 변경" : "구매하고 변경"}</button>
                   </article>
@@ -947,13 +1594,11 @@ export default function Home() {
               })}
             </div>
             <p className="device-note">정원은 현재 기기에 저장됩니다.</p>
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
 
       {mcpOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setMcpOpen(false)}>
-          <section className="dialog mcp-dialog" role="dialog" aria-modal="true" aria-label="MCP 연결" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="MCP 연결" panelClass="mcp-dialog" onDismiss={() => setMcpOpen(false)}>
             <button className="dialog-close" onClick={() => setMcpOpen(false)} aria-label="닫기">×</button>
             <header className="mcp-header">
               <TerracottaMark size="large" />
@@ -1025,13 +1670,157 @@ export default function Home() {
             </form>
 
             <p className="mcp-security"><span>✓</span> OAuth 2.1 · PKCE S256 · 토큰 암호화 저장 · 내부 네트워크 주소 차단</p>
-          </section>
-        </div>
+        </WorkspaceDialog>
+      )}
+
+      {projectOpen && (
+        <WorkspaceDialog label="프로젝트 워크스페이스" panelClass="project-dialog" onDismiss={() => setProjectOpen(false)}>
+            <button className="dialog-close" onClick={() => setProjectOpen(false)} aria-label="닫기">×</button>
+            <header><p>Terracotta Projects</p><h2>프로젝트별로 기억하고, 파일까지 작업</h2><span>대화·모델 인계·프로젝트 지침·로컬 파일·실행 기록을 한 범위로 묶습니다.</span></header>
+
+            <div className="project-layout">
+              <aside className="project-list-panel">
+                <button className={!projectEditingId ? "active create" : "create"} type="button" onClick={() => { setProjectEditingId(null); setProjectForm(formForProject(null)); setProjectTab("overview"); }}>＋ 새 프로젝트</button>
+                {projects.map((project) => (
+                  <button className={projectEditingId === project.id ? "active" : ""} type="button" key={project.id} onClick={() => void loadProjectDetails(project.id)}>
+                    <i style={{ background: project.color }} /><span><b>{project.name}</b><small>{project.agentId ? `${project.rootPath} · 로컬 연결` : "대화 전용"}</small></span>
+                  </button>
+                ))}
+              </aside>
+
+              <div className="project-main">
+                {projectEditingId && (
+                  <div className="project-tabs" role="tablist" aria-label="프로젝트 도구">
+                    <button role="tab" aria-selected={projectTab === "overview"} className={projectTab === "overview" ? "active" : ""} onClick={() => setProjectTab("overview")}>개요</button>
+                    <button role="tab" aria-selected={projectTab === "files"} className={projectTab === "files" ? "active" : ""} onClick={() => { setProjectTab("files"); void loadProjectFiles(); }}>파일</button>
+                    <button role="tab" aria-selected={projectTab === "changes"} className={projectTab === "changes" ? "active" : ""} onClick={() => { setProjectTab("changes"); void loadProjectChanges(); }}>변경 내역</button>
+                    <button type="button" className="project-use" onClick={() => void selectProject(projectEditingId)}>이 프로젝트에서 대화</button>
+                  </div>
+                )}
+
+                {projectTab === "overview" && (
+                  <form className="project-form" onSubmit={saveProject}>
+                    <div className="project-form-heading"><div><b>{projectEditingId ? "프로젝트 설정" : "새 프로젝트 만들기"}</b><small>연결 범위는 언제든 바꿀 수 있어요.</small></div>{projectEditingId && <button type="button" onClick={() => void archiveProject()}>보관</button>}</div>
+                    <label><span>이름</span><input value={projectForm.name} onChange={(event) => setProjectForm((value) => ({ ...value, name: event.target.value }))} placeholder="예: Terracotta 앱" required maxLength={80} /></label>
+                    <label><span>설명</span><input value={projectForm.description} onChange={(event) => setProjectForm((value) => ({ ...value, description: event.target.value }))} placeholder="이 프로젝트에서 달성할 목표" maxLength={1200} /></label>
+                    <div className="project-form-grid">
+                      <label><span>연결 컴퓨터</span><select value={projectForm.agentId} onChange={(event) => setProjectForm((value) => ({ ...value, agentId: event.target.value }))}><option value="">대화만 사용</option>{localAgents.map((agent) => <option value={agent.id} key={agent.id}>{agent.name}{agent.online ? " · 온라인" : " · 오프라인"}</option>)}</select></label>
+                      <label><span>프로젝트 폴더</span><input value={projectForm.rootPath} onChange={(event) => setProjectForm((value) => ({ ...value, rootPath: event.target.value }))} placeholder=". 또는 apps/web" /></label>
+                      <label><span>기본 모델</span><select value={projectForm.modelPreference} onChange={(event) => setProjectForm((value) => ({ ...value, modelPreference: event.target.value as ModelPreference }))}><option value="latest">최신 모델 자동</option><option value="gpt">GPT 우선</option><option value="claude">Claude 우선</option><option value="gemini">Gemini 우선</option></select></label>
+                      <label><span>파일 권한</span><select value={projectForm.fileAccess} onChange={(event) => setProjectForm((value) => ({ ...value, fileAccess: event.target.value as "read-only" | "read-write" }))}><option value="read-write">읽기 + 승인 후 쓰기</option><option value="read-only">읽기 전용</option></select></label>
+                      <label><span>터미널 권한</span><select value={projectForm.commandAccess} onChange={(event) => setProjectForm((value) => ({ ...value, commandAccess: event.target.value as "disabled" | "approval" }))}><option value="approval">승인 후 실행</option><option value="disabled">사용 안 함</option></select></label>
+                    </div>
+                    <label><span>프로젝트 지침</span><textarea value={projectForm.instructions} onChange={(event) => setProjectForm((value) => ({ ...value, instructions: event.target.value }))} placeholder="예: TypeScript를 사용하고, 기존 테스트를 통과시킨 뒤 변경 이유를 요약해줘." rows={5} maxLength={8000} /></label>
+                    <div className="project-access-note"><span>✓</span><p><b>폴더 경계를 두 번 확인합니다.</b><small>서버가 프로젝트 상대 경로를 고정하고, 로컬 에이전트가 실제 경로와 심볼릭 링크를 다시 검사합니다. 파일 저장과 명령 실행은 승인 후에만 가능합니다.</small></p></div>
+                    <button className="project-save" disabled={projectBusy}>{projectBusy ? "저장 중" : projectEditingId ? "설정 저장" : "프로젝트 만들기"}</button>
+                  </form>
+                )}
+
+                {projectTab === "files" && projectEditingId && (
+                  <section className="project-files">
+                    <div className="project-file-toolbar">
+                      <form onSubmit={searchProjectFiles}><input value={projectSearchQuery} onChange={(event) => setProjectSearchQuery(event.target.value)} placeholder="프로젝트 안에서 검색" aria-label="프로젝트 파일 검색" /><button disabled={projectBusy}>검색</button></form>
+                      <button type="button" onClick={() => void loadProjectFiles()} disabled={projectBusy}>파일 새로고침</button>
+                    </div>
+                    <div className="project-file-workbench">
+                      <aside>
+                        <div className="project-new-file"><input value={projectFilePath} onChange={(event) => setProjectFilePath(event.target.value)} placeholder="새 파일 경로" aria-label="새 프로젝트 파일 경로" /><button type="button" onClick={newProjectFile}>새 파일</button></div>
+                        {projectSearchResults.length > 0 && <div className="project-search-results"><b>검색 결과</b>{projectSearchResults.map((match, index) => <button type="button" key={`${match.path}-${match.line}-${index}`} onClick={() => void openProjectFile(match.path)}><span>{match.path}{match.line ? `:${match.line}` : ""}</span><small>{match.preview}</small></button>)}</div>}
+                        <div className="project-file-tree">{projectFiles.length ? projectFiles.map((file) => file.type === "file" ? <button type="button" className={projectFile?.path === file.path ? "active" : ""} key={file.path} onClick={() => void openProjectFile(file.path)}><span>·</span>{file.path}<small>{file.size < 1024 ? `${file.size} B` : `${Math.round(file.size / 1024)} KB`}</small></button> : <span key={file.path}><i />{file.path}</span>) : <small>온라인 로컬 에이전트를 연결하고 파일 새로고침을 눌러주세요.</small>}</div>
+                      </aside>
+                      <div className="project-editor">
+                        {projectFile ? <><header><div><b>{projectFile.path}</b><small>{projectFile.hash ? `${projectFile.size.toLocaleString()} bytes · SHA ${projectFile.hash.slice(0, 8)}` : "새 파일"}</small></div><button type="button" onClick={() => void saveProjectFile()} disabled={projectBusy || projectForm.fileAccess === "read-only"}>승인하고 저장</button></header><textarea value={projectFileContent} onChange={(event) => setProjectFileContent(event.target.value)} spellCheck={false} aria-label="프로젝트 파일 편집기" /></> : <div className="project-editor-empty"><b>파일을 선택하세요</b><small>모델도 같은 목록·읽기·검색 도구를 사용하고, 저장 전에는 변경 내용을 승인받습니다.</small></div>}
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {projectTab === "changes" && projectEditingId && (
+                  <section className="project-changes">
+                    <div className="project-changes-head"><div><b>Git 변경과 Terracotta 활동</b><small>모델·사용자 파일 작업이 프로젝트별로 남습니다.</small></div><button type="button" onClick={() => void loadProjectChanges()} disabled={projectBusy}>새로고침</button></div>
+                    <div className="project-git-summary"><b>git status</b><pre>{projectDiff.status || "변경 없음 또는 아직 불러오지 않음"}</pre></div>
+                    {(projectDiff.diff || projectDiff.staged) && <details open><summary>Git diff</summary><pre>{[projectDiff.diff, projectDiff.staged && `\n# staged\n${projectDiff.staged}`].filter(Boolean).join("\n")}</pre></details>}
+                    <div className="project-activity"><b>최근 활동</b>{projectActivities.length ? projectActivities.map((activity) => <article key={activity.id}><i className={activity.status} /><div><strong>{activity.action}</strong><span>{activity.path ?? "프로젝트"}</span><small>{activity.summary}</small></div><time>{new Date(activity.created_at).toLocaleString("ko-KR")}</time></article>) : <small>아직 기록된 파일 작업이 없어요.</small>}</div>
+                  </section>
+                )}
+
+                <p className="project-note">{projectNote}</p>
+              </div>
+            </div>
+        </WorkspaceDialog>
+      )}
+
+      {localAgentOpen && (
+        <WorkspaceDialog label="로컬 터미널 연결" panelClass="local-agent-dialog" onDismiss={() => setLocalAgentOpen(false)}>
+            <button className="dialog-close" onClick={() => setLocalAgentOpen(false)} aria-label="닫기">×</button>
+            <header>
+              <p>Terracotta Local Agent</p>
+              <h2>내 컴퓨터에서 안전하게 실행</h2>
+              <span>Windows PowerShell, macOS zsh, Linux bash를 자동으로 감지합니다.</span>
+            </header>
+
+            <div className="local-agent-safety">
+              <span>1</span><div><b>명령을 먼저 확인</b><small>모델이 제안한 명령과 작업 경로를 채팅에서 보여줍니다.</small></div>
+              <span>2</span><div><b>승인 후에만 실행</b><small>승인하지 않은 명령은 컴퓨터로 전달되지 않습니다.</small></div>
+              <span>3</span><div><b>작업 폴더 안에서만</b><small>시스템 명령, 관리자 권한, 폴더 밖 경로를 로컬에서 다시 차단합니다.</small></div>
+            </div>
+
+            <div className="local-agent-toolbar">
+              <p>{localAgentNote}</p>
+              <button type="button" onClick={() => void loadLocalAgents()} disabled={localAgentBusy}>{localAgentBusy ? "확인 중" : "상태 새로고침"}</button>
+            </div>
+
+            {localAgents.length > 0 && (
+              <div className="local-agent-list">
+                {localAgents.map((agent) => (
+                  <article key={agent.id}>
+                    <i className={agent.online ? "online" : ""} />
+                    <div><b>{agent.name}</b><small>{agent.shell ?? "연결 대기"}{agent.workspace ? ` · ${agent.workspace}` : ""}</small></div>
+                    <em>{agent.online ? "온라인" : "오프라인"}</em>
+                    <button type="button" onClick={() => void revokeLocalAgent(agent.id)} disabled={localAgentBusy}>연결 해제</button>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            <section className="local-agent-pair">
+              <div className="local-agent-section-head">
+                <div><h3>새 컴퓨터 연결</h3><p>Node.js 20 이상이 설치된 터미널에서 두 줄을 실행합니다.</p></div>
+                <div className="local-platform-tabs">
+                  <button type="button" className={localAgentPlatform === "windows" ? "active" : ""} onClick={() => setLocalAgentPlatform("windows")}>Windows</button>
+                  <button type="button" className={localAgentPlatform === "mac" ? "active" : ""} onClick={() => setLocalAgentPlatform("mac")}>macOS / Linux</button>
+                </div>
+              </div>
+              <div className="local-agent-name-row">
+                <input value={localAgentName} onChange={(event) => setLocalAgentName(event.target.value)} maxLength={50} placeholder="예: 회사 노트북" aria-label="컴퓨터 이름" />
+                <button type="button" onClick={() => void pairLocalAgent()} disabled={localAgentBusy}>연결 키 만들기</button>
+              </div>
+              {localAgentToken && (
+                <div className="local-agent-command">
+                  <div><b>{localAgentPlatform === "windows" ? "PowerShell" : "Terminal"}에 붙여넣기</b><small>키는 이 화면에서만 다시 볼 수 있어요.</small></div>
+                  <pre><code>{localAgentCommand}</code></pre>
+                  <button type="button" onClick={() => void navigator.clipboard.writeText(localAgentCommand)}>명령 복사</button>
+                </div>
+              )}
+            </section>
+
+            {localAgentJobs.length > 0 && (
+              <section className="local-agent-history">
+                <div className="local-agent-section-head"><div><h3>최근 실행</h3><p>누가 어떤 명령을 승인했는지 결과와 함께 남습니다.</p></div></div>
+                {localAgentJobs.slice(0, 6).map((job) => (
+                  <details key={job.id}>
+                    <summary><code>{job.command}</code><span className={job.status}>{job.status === "completed" ? "완료" : job.status === "running" ? "실행 중" : job.status === "queued" ? "대기" : "확인 필요"}</span></summary>
+                    <small>{job.cwd} · exit {job.exitCode ?? "—"}</small>
+                    {(job.stdout || job.stderr) && <pre>{job.stdout || job.stderr}</pre>}
+                  </details>
+                ))}
+              </section>
+            )}
+        </WorkspaceDialog>
       )}
 
       {modelLabOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setModelLabOpen(false)}>
-          <section className="dialog model-lab-dialog" role="dialog" aria-modal="true" aria-label="모델 연구소" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="모델 연구소" panelClass="model-lab-dialog" onDismiss={() => setModelLabOpen(false)}>
             <button className="dialog-close" onClick={() => setModelLabOpen(false)} aria-label="닫기">×</button>
             <header className="model-lab-header">
               <div><p>Model intelligence</p><h2>최근 모델, 한눈에 비교</h2><span>순위 하나보다 실제 작업 적합도와 비용까지 같이 봅니다.</span></div>
@@ -1049,6 +1838,26 @@ export default function Home() {
 
             {modelInsightLoading && !modelInsights && <div className="model-lab-loading"><TerracottaMark size="large" /><b>최신 순위를 모으고 있어요.</b><span>Text · Agent · WebDev · Vision · Search Arena를 확인합니다.</span></div>}
             {!modelInsightLoading && !modelInsights && <div className="model-lab-loading"><b>평가 정보를 불러오지 못했어요.</b><span>잠시 뒤 순위 새로고침을 눌러주세요.</span></div>}
+
+            {visibleModelInsights.length > 0 && (
+              <section className="model-compare">
+                <div className="model-compare-title"><div><b>{modelInsightFilter === "전체" ? "전체 모델 요약" : `${modelInsightFilter} 추천 모델`}</b><small>강점, 대표 평가, 가격을 먼저 비교한 뒤 아래 상세 설명을 확인하세요.</small></div><span>{visibleModelInsights.length}개 모델</span></div>
+                <div className="model-compare-table" role="table" aria-label="모델 핵심 비교">
+                  <div className="model-compare-row heading" role="row"><span>모델</span><span>가장 잘하는 일</span><span>대표 평가</span><span>비용</span></div>
+                  {visibleModelInsights.map((model) => {
+                    const firstArena = arenaMetricOrder.map(({ id, label }) => ({ metric: model.arena[id], label })).find((item) => item.metric);
+                    return (
+                      <div className="model-compare-row" role="row" key={`compare-${model.id}`}>
+                        <span><i>{model.mark}</i><b>{model.name}</b><small>{model.provider}</small></span>
+                        <span><b>{model.bestFor[0] ?? model.categories[0] ?? "범용 작업"}</b><small>{model.summary}</small></span>
+                        <span><b>{model.intelligenceIndex != null ? `AA ${model.intelligenceIndex}` : firstArena?.metric ? `${firstArena.label} #${firstArena.metric.rank}` : "공식 지표 없음"}</b><small>{model.intelligenceIndex != null && firstArena?.metric ? `${firstArena.label} Arena #${firstArena.metric.rank}` : model.context}</small></span>
+                        <span><b>{model.price}</b><small>{model.context}</small></span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
             <div className="model-insight-grid">
               {visibleModelInsights.map((model) => {
@@ -1084,15 +1893,13 @@ export default function Home() {
             </div>
 
             {modelInsights && <div className="model-lab-sources"><p>{modelInsights.caveat}</p><div><span>출처</span>{modelInsights.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" title={source.note} key={source.name}>{source.name} ↗</a>)}</div></div>}
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
 
       {settingsOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
-          <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-label="모델 및 구독" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="모델 및 구독" panelClass="settings-dialog" onDismiss={() => setSettingsOpen(false)}>
             <button className="dialog-close" onClick={() => setSettingsOpen(false)} aria-label="닫기">×</button>
-            <header><p>Model router · 2026.07</p><h2>Terracotta Auto</h2><span>작업에 맞는 모델을 고르고, GPT와 Claude의 우선순위는 내가 정합니다.</span></header>
+            <header><p>Model router · 2026.07</p><h2>Terracotta Auto</h2><span>작업에 맞는 모델을 고르고, GPT·Claude·Gemini의 우선순위는 내가 정합니다.</span></header>
 
             <button className="model-lab-entry" type="button" onClick={openModelLab}><span>◫</span><div><b>모델 연구소 열기</b><small>최신 모델의 장단점, 아레나 순위와 작업별 평가를 비교하세요.</small></div><em>비교하기 →</em></button>
 
@@ -1111,11 +1918,11 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <p className="router-note"><i /> 최신 우선은 OpenAI와 Anthropic의 공식 모델 생성 시각을 비교해 자동 전환합니다. 키가 연결되기 전에는 검증된 기본 목록을 사용합니다.</p>
+              <p className="router-note"><i /> 최신 우선은 GPT와 Claude의 공식 최신 모델을 비교하고 Gemini를 다음 경로로 둡니다. Gemini 우선을 직접 선택할 수도 있어요.</p>
             </section>
 
             <section className="settings-section" aria-labelledby="models-title">
-              <div className="settings-heading"><div><h3 id="models-title">연결 모델</h3><p>하나의 작업 안에서도 필요한 모델만 조합합니다.</p></div><span>4개 공급사 · 5개 핵심 모델</span></div>
+              <div className="settings-heading"><div><h3 id="models-title">연결 모델</h3><p>하나의 작업 안에서도 필요한 모델만 조합합니다.</p></div><span>5개 공급사 · 6개 핵심 모델</span></div>
               <div className="simple-models">{modelCatalog.map((model) => {
                 const provider = model.provider;
                 const connection = registryStatus?.connections.find((item) => item.provider === provider);
@@ -1127,11 +1934,12 @@ export default function Home() {
             </section>
 
             <section className="settings-section pricing-section" aria-labelledby="pricing-title">
-              <div className="settings-heading"><div><h3 id="pricing-title">구독 출시 가안</h3><p>모든 플랜에서 GPT, Claude, Perplexity, Higgsfield를 사용할 수 있어요.</p></div><span>월간 · VAT 별도</span></div>
+              <div className="settings-heading"><div><h3 id="pricing-title">구독 출시 가안</h3><p>모든 플랜에서 GPT, Claude, Gemini, Perplexity, Higgsfield를 사용할 수 있어요.</p></div><span>월간 · VAT 별도</span></div>
               <div className="cost-benchmarks">
-                <span><b>GPT-5.6 Sol</b><small>$5 입력 · $30 출력 / 1M</small></span>
-                <span><b>Claude Fable 5</b><small>$10 입력 · $50 출력 / 1M</small></span>
-                <span><b>Claude Sonnet 5</b><small>$2 입력 · $10 출력 / 1M*</small></span>
+                <span><b>GPT-6.2 Sol</b><small>$2 입력 · $10 출력 / 1M</small></span>
+                <span><b>Claude Fable 5.2</b><small>$8 입력 · $40 출력 / 1M</small></span>
+                <span><b>Claude Sonnet 5.5</b><small>$2 입력 · $10 출력 / 1M</small></span>
+                <span><b>Gemini 4 Hydrogen</b><small>$1.50 입력 · $7.50 출력 / 1M</small></span>
                 <span><b>Sonar Pro</b><small>$3 입력 · $15 출력 / 1M + 검색</small></span>
                 <span><b>Higgsfield</b><small>$9 · $49 · $129 크레딧 플랜</small></span>
               </div>
@@ -1146,12 +1954,11 @@ export default function Home() {
                   </article>
                 ))}
               </div>
-              <p className="pricing-note">짧은 텍스트는 적게, 심층 리서치·영상·Fable 5 최고 난도 작업은 많이 차감됩니다. 소비자용 구독을 재판매하는 금액이 아니라 API·생성 크레딧, 환율 버퍼, 라우팅·개인 메모리·저장 비용을 포함한 출시 가격입니다. *Sonnet 5의 프로모션 가격은 2026년 8월 31일까지이며 이후 원가 예산에 $3/$15 단가를 반영합니다.</p>
-              <div className="pricing-sources"><span>공식 가격 확인</span><a href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer">OpenAI</a><a href="https://www.anthropic.com/news/claude-sonnet-5" target="_blank" rel="noreferrer">Anthropic</a><a href="https://docs.perplexity.ai/docs/getting-started/pricing" target="_blank" rel="noreferrer">Perplexity</a><a href="https://higgsfield.ai/pricing" target="_blank" rel="noreferrer">Higgsfield</a></div>
+              <p className="pricing-note">모델 단가는 기본 입력·출력 토큰 100만 개 기준입니다. 표의 월 구독료는 API 사용료와 생성 크레딧, 환율 변동, 개인 메모리 저장 비용을 고려한 가안입니다.</p>
+              <div className="pricing-sources"><span>공식 가격 확인</span><a href="https://developers.openai.com/api/docs/models/gpt-6.2-sol" target="_blank" rel="noreferrer">OpenAI</a><a href="https://platform.claude.com/docs/en/about-claude/pricing" target="_blank" rel="noreferrer">Anthropic</a><a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noreferrer">Google Gemini</a><a href="https://docs.perplexity.ai/docs/getting-started/pricing" target="_blank" rel="noreferrer">Perplexity</a><a href="https://higgsfield.ai/pricing" target="_blank" rel="noreferrer">Higgsfield</a></div>
             </section>
             <button className="settings-save" onClick={() => setSettingsOpen(false)}>확인</button>
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
     </main>
   );

@@ -33,6 +33,7 @@ test("self-hosting generates and reuses a persistent MCP encryption key", async 
       "utf8",
     );
     assert.match(firstRuntime, /TERRACOTTA_SELF_HOSTED="true"/);
+    assert.match(firstRuntime, /TERRACOTTA_TRUST_AUTH_HEADERS="false"/);
     assert.equal(Buffer.from(firstKey.trim(), "base64").length, 32);
 
     const second = runRuntimeSetup(runtimeFile, sandbox);
@@ -42,6 +43,24 @@ test("self-hosting generates and reuses a persistent MCP encryption key", async 
       "utf8",
     );
     assert.equal(secondKey, firstKey);
+  } finally {
+    await rm(sandbox, { recursive: true, force: true });
+  }
+});
+
+test("self-hosting only enables team identity headers when explicitly trusted", async () => {
+  const sandbox = await mkdtemp(path.join(tmpdir(), "terracotta-selfhost-"));
+  const runtimeFile = path.join(sandbox, "runtime.env");
+
+  try {
+    const result = runRuntimeSetup(runtimeFile, sandbox, {
+      TERRACOTTA_TRUST_AUTH_HEADERS: "true",
+      GEMINI_API_KEY: "test-gemini-key",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const runtime = await readFile(runtimeFile, "utf8");
+    assert.match(runtime, /TERRACOTTA_TRUST_AUTH_HEADERS="true"/);
+    assert.match(runtime, /GEMINI_API_KEY="test-gemini-key"/);
   } finally {
     await rm(sandbox, { recursive: true, force: true });
   }
