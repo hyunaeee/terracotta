@@ -1,5 +1,36 @@
 @import "tailwindcss";
 
+.context-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(760px, 100%);
+  margin: 0 auto 7px;
+  padding: 7px 12px;
+  border: 1px solid #dfa88d;
+  border-radius: 10px;
+  background: #fff1e9;
+  color: #713a22;
+  font-size: 13px;
+}
+
+.context-feedback button, .retry-prompt {
+  border: 0;
+  background: transparent;
+  padding: 5px 2px;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.message .retry-prompt {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
 :root {
   --ink: #232323;
   --muted: #777773;

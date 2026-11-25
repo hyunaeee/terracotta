@@ -1,13 +1,30 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { ArenaCategory, ModelInsight } from "@/lib/model-intelligence";
+import { WorkspaceDialog } from "./workspace-dialog";
 
 const quickPrompts = [
-  "오늘 회의 내용을 정리해줘",
-  "이번 주에 배운 것을 복습해줘",
-  "새 프로젝트 아이디어를 같이 생각해줘",
-];
+  { title: "회의 정리", prompt: "오늘 회의 내용을 정리해줘", icon: "notes" },
+  { title: "학습 복습", prompt: "이번 주에 배운 것을 복습해줘", icon: "book" },
+  { title: "아이디어 탐색", prompt: "새 프로젝트 아이디어를 같이 생각해줘", icon: "sprout" },
+] as const;
+
+const pixelIcons = {
+  chat: "M2 2h12v1h1v8h-1v1H8l-4 3v-3H2v-1H1V3h1zm1 2v6h3v2l2-2h5V4z",
+  folder: "M1 3h6l2 2h6v8H1zm2 4v4h10V7z",
+  sprout: "M1 3h4v1h2v2h1v2h1V5h1V3h2V2h3v4h-1v2h-2v1h-2v4h3v2H4v-2h4V9H5V8H3V7H2V5H1z",
+  link: "M9 2h4v1h2v4h-1v2h-2v1h-2V8h2V6h1V4h-3v1H8V3h1zM3 6h3v2H4v2H3v2h3v-1h2v2H7v1H3v-1H1V9h1V7h1zm3 1h4v2H6z",
+  terminal: "M1 3h14v11H1zm2 2v7h10V5zm1 1h2v1h1v2H6v1H4V9h1V7H4zm4 4h3v1H8z",
+  chart: "M1 13h14v2H1zm1-5h3v4H2zm5-5h3v9H7zm5 3h3v6h-3z",
+  sliders: "M1 4h3V2h3v2h8v2H7v2H4V6H1zm0 6h8V8h3v2h3v2h-3v2H9v-2H1z",
+  notes: "M3 1h8v2h2v1h1v11H3zm2 2v10h7V6H9V3zm1 4h5v1H6zm0 3h4v1H6z",
+  book: "M1 3h5v1h4V3h5v10h-5v1H6v-1H1zm2 2v6h3v1h1V6H6V5zm6 1v6h1v-1h3V5h-3v1z",
+} as const;
+
+function PixelIcon({ name }: { name: keyof typeof pixelIcons }) {
+  return <svg className="pixel-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" shapeRendering="crispEdges"><path fill="currentColor" fillRule="evenodd" d={pixelIcons[name]} /></svg>;
+}
 
 type ModelPreference = "latest" | "gpt" | "claude" | "gemini";
 type RegistryStatus = {
@@ -37,10 +54,10 @@ const arenaMetricOrder: Array<{ id: ArenaCategory; label: string }> = [
 ];
 
 const modelCatalog = [
-  { id: "gpt", provider: "openai", mark: "G", name: "GPT-5.6 Sol", role: "주 추론 · 코딩" },
-  { id: "fable", provider: "anthropic", mark: "F", name: "Claude Fable 5", role: "최고 난도 · 장기 에이전트" },
-  { id: "claude", provider: "anthropic", mark: "C", name: "Claude Sonnet 5", role: "빠른 에이전트 · 문서" },
-  { id: "gemini", provider: "google", mark: "M", name: "Gemini 3.6 Flash", role: "멀티모달 · 빠른 에이전트" },
+  { id: "gpt", provider: "openai", mark: "G", name: "GPT-6.2 Sol", role: "주 추론 · 코딩" },
+  { id: "fable", provider: "anthropic", mark: "F", name: "Claude Fable 5.2", role: "최고 난도 · 장기 에이전트" },
+  { id: "claude", provider: "anthropic", mark: "C", name: "Claude Sonnet 5.5", role: "빠른 에이전트 · 문서" },
+  { id: "gemini", provider: "google", mark: "M", name: "Gemini 4 Hydrogen", role: "멀티모달 · 빠른 에이전트" },
   { id: "perplexity", provider: "perplexity", mark: "P", name: "Perplexity Sonar Pro", role: "웹 검색 · 리서치" },
   { id: "higgsfield", provider: "higgsfield", mark: "H", name: "Higgsfield", role: "이미지 · 영상" },
 ];
@@ -112,7 +129,8 @@ type ApprovalRequest = {
   status?: "pending" | "running" | "approved" | "rejected";
 };
 type SessionRole = "owner" | "editor" | "viewer";
-type Message = { role: "user" | "assistant"; text: string; author?: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest };
+type Message = { role: "user" | "assistant"; text: string; author?: string; models?: string; trace?: OrchestrationStep[]; approval?: ApprovalRequest; retryPrompt?: string };
+type ContextTarget = { sessionId?: string; projectId?: string | null; create?: boolean };
 type ContextSession = { id: string; projectId?: string | null; title: string; lastProvider: string | null; ownerEmail?: string; role?: SessionRole };
 type TeamMember = { email: string; role: SessionRole; invitedBy: string | null; createdAt: string };
 type TeamHandoff = { id: string; fromEmail: string; toEmail: string; note: string; status: "pending" | "accepted"; createdAt: string };
@@ -286,7 +304,11 @@ export default function Home() {
   const [sessionTitle, setSessionTitle] = useState("새 작업");
   const [lastContextProvider, setLastContextProvider] = useState<string | null>(null);
   const [recentSessions, setRecentSessions] = useState<ContextSession[]>([]);
-  const [contextLoading, setContextLoading] = useState(false);
+  const [contextLoading, setContextLoading] = useState(true);
+  const [failedContext, setFailedContext] = useState<ContextTarget | null>(null);
+  const latestContextRequest = useRef(0);
+  const activeConversation = useRef(0);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [currentUser, setCurrentUser] = useState("owner");
   const [sessionRole, setSessionRole] = useState<SessionRole>("owner");
   const [sessionOwner, setSessionOwner] = useState("owner");
@@ -349,9 +371,46 @@ export default function Home() {
   const [registryStatus, setRegistryStatus] = useState<RegistryStatus | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuCloseRef = useRef<HTMLButtonElement>(null);
   const [ready, setReady] = useState(false);
   const [gardenNote, setGardenNote] = useState("정원은 아직 비어 있어요. 스토어에서 첫 잔디를 심어보세요.");
   const gardenCanvasRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!mobileMenu) return;
+    menuCloseRef.current?.focus();
+    function handleResize() {
+      if (!menuTriggerRef.current?.getClientRects().length) setMobileMenu(false);
+    }
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [mobileMenu]);
+
+  function dismissNavigation() {
+    if (!mobileMenu) return;
+    setMobileMenu(false);
+    menuTriggerRef.current?.focus();
+  }
+
+  function handleNavigationKey(event: KeyboardEvent<HTMLElement>) {
+    if (!mobileMenu) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissNavigation();
+    } else if (event.key === "Tab") {
+      const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+  }
 
   /* eslint-disable react-hooks/set-state-in-effect -- browser-persisted owner preferences hydrate once after mount */
   useEffect(() => {
@@ -440,10 +499,13 @@ export default function Home() {
     void fetch("/api/model-registry", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preference: modelPreference }) }).catch(() => undefined);
   }, [modelPreference, ready]);
 
-  useEffect(() => {
-    if (!ready) return;
+  const loadInitialData = useEffectEvent(() => {
     void loadRegistry();
     void loadWorkContext();
+  });
+
+  useEffect(() => {
+    if (ready) loadInitialData();
   }, [ready]);
 
   function applyContextPayload(payload: ContextPayload, replaceMessages = true) {
@@ -464,30 +526,41 @@ export default function Home() {
     if (selected) setModelPreference(selected.modelPreference);
   }
 
-  async function loadWorkContext(targetSessionId?: string, targetProjectId?: string | null) {
+  async function loadWorkContext(target: ContextTarget = {}) {
+    const request = ++latestContextRequest.current;
     setContextLoading(true);
+    setFailedContext(null);
+    dismissNavigation();
     try {
       const params = new URLSearchParams();
-      if (targetSessionId) params.set("sessionId", targetSessionId);
-      else if (targetProjectId) params.set("projectId", targetProjectId);
+      if (target.sessionId) params.set("sessionId", target.sessionId);
+      else if (target.projectId) params.set("projectId", target.projectId);
       const query = params.size ? `?${params.toString()}` : "";
-      const response = await fetch(`/api/context${query}`, { cache: "no-store" });
+      const response = target.create
+        ? await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "new", projectId: target.projectId }) })
+        : await fetch(`/api/context${query}`, { cache: "no-store" });
       if (!response.ok) throw new Error("context unavailable");
-      applyContextPayload(await response.json() as ContextPayload);
-      setMobileMenu(false);
+      const payload = await response.json() as ContextPayload;
+      if (request !== latestContextRequest.current) return;
+      activeConversation.current++;
+      setIsWorking(false);
+      applyContextPayload(payload);
+      if (target.create) setPrompt("");
     } catch {
-      setSessionId(null);
+      if (request === latestContextRequest.current) setFailedContext(target);
     } finally {
-      setContextLoading(false);
+      if (request === latestContextRequest.current) setContextLoading(false);
     }
   }
 
   async function runTeamAction(body: Record<string, unknown>) {
     if (!sessionId || teamBusy) return null;
+    const conversation = activeConversation.current;
     setTeamBusy(true);
     try {
       const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, sessionId }) });
       const payload = await response.json() as ContextPayload;
+      if (conversation !== activeConversation.current) return null;
       if (!response.ok) throw new Error(payload.error || "팀 공유 설정을 저장하지 못했어요.");
       applyContextPayload(payload);
       return payload;
@@ -547,7 +620,7 @@ export default function Home() {
   function openModelLab() {
     setModelLabOpen(true);
     setSettingsOpen(false);
-    setMobileMenu(false);
+    dismissNavigation();
     if (!modelInsights) void loadModelInsights();
   }
 
@@ -583,7 +656,7 @@ export default function Home() {
 
   function openLocalAgent() {
     setLocalAgentOpen(true);
-    setMobileMenu(false);
+    dismissNavigation();
     void loadLocalAgents();
   }
 
@@ -661,7 +734,7 @@ export default function Home() {
   function openProjectWorkspace(targetProjectId: string | null = projectId, tab: "overview" | "files" | "changes" = "overview") {
     setProjectOpen(true);
     setProjectTab(tab);
-    setMobileMenu(false);
+    dismissNavigation();
     setProjectFile(null);
     setProjectFileContent("");
     setProjectSearchResults([]);
@@ -692,7 +765,7 @@ export default function Home() {
       setProjects((items) => [payload.project!, ...items.filter((item) => item.id !== payload.project!.id)]);
       setModelPreference(payload.project.modelPreference);
       setProjectNote("프로젝트 설정을 저장했어요. 이제 이 프로젝트의 대화와 파일 작업이 한곳에 모입니다.");
-      await loadWorkContext(undefined, payload.project.id);
+      await loadWorkContext({ projectId: payload.project.id });
     } catch (error) {
       setProjectNote(error instanceof Error ? error.message : "프로젝트를 저장하지 못했어요.");
     } finally {
@@ -789,16 +862,13 @@ export default function Home() {
   }
 
   async function selectProject(targetProjectId: string) {
-    const project = projects.find((item) => item.id === targetProjectId);
-    setProjectId(targetProjectId);
-    if (project) setModelPreference(project.modelPreference);
-    await loadWorkContext(undefined, targetProjectId);
     setProjectOpen(false);
+    await loadWorkContext({ projectId: targetProjectId });
   }
 
   function openMcpHub() {
     setMcpOpen(true);
-    setMobileMenu(false);
+    dismissNavigation();
     void loadMcp();
   }
 
@@ -876,13 +946,14 @@ export default function Home() {
   }
 
   const routingOrder = useMemo(() => {
-    const gemini = registryStatus?.models.find((model) => model.provider === "google")?.name ?? "Gemini 3.6 Flash";
-    if (modelPreference === "gemini") return { primary: gemini, backup: registryStatus?.models.find((model) => model.provider === "openai")?.name ?? "GPT-5.6" };
-    if (modelPreference === "claude") return { primary: registryStatus?.models.find((model) => model.provider === "anthropic")?.name ?? "Claude Fable 5", backup: gemini };
+    const gemini = registryStatus?.models.find((model) => model.provider === "google")?.name ?? "Gemini 4 Hydrogen";
+    const gpt = registryStatus?.models.find((model) => model.provider === "openai")?.name ?? "GPT-6.2 Sol";
+    if (modelPreference === "gemini") return { primary: gemini, backup: gpt };
+    if (modelPreference === "claude") return { primary: registryStatus?.models.find((model) => model.provider === "anthropic")?.name ?? "Claude Fable 5.2", backup: gemini };
     if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "anthropic") return { primary: registryStatus.latestPrimary.model, backup: gemini };
-    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "google") return { primary: registryStatus.latestPrimary.model, backup: registryStatus.models.find((model) => model.provider === "openai")?.name ?? "GPT" };
+    if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "google") return { primary: registryStatus.latestPrimary.model, backup: gpt };
     if (modelPreference === "latest" && registryStatus?.latestPrimary?.provider === "openai") return { primary: registryStatus.latestPrimary.model, backup: gemini };
-    return { primary: "GPT-5.6", backup: gemini };
+    return { primary: gpt, backup: gemini };
   }, [modelPreference, registryStatus]);
 
   const preferenceLabel = modelPreference === "latest" ? "최신 우선" : modelPreference === "gpt" ? "GPT 우선" : modelPreference === "claude" ? "Claude 우선" : "Gemini 우선";
@@ -920,6 +991,7 @@ export default function Home() {
   }, [mcpCategory, mcpConnections, mcpQuery]);
   const setupConnection = mcpConnections.find((item) => item.id === mcpSetupId) ?? null;
   const canEditSession = sessionRole !== "viewer";
+  const canSubmitTask = canEditSession && !contextLoading && !failedContext && !isWorking;
   const pendingTeamHandoff = teamHandoffs.find((handoff) => handoff.status === "pending" && handoff.toEmail === currentUser) ?? null;
   const handoffTargets = teamMembers.filter((member) => member.email !== currentUser && (member.role === "owner" || member.role === "editor"));
 
@@ -970,7 +1042,8 @@ export default function Home() {
   async function submitTask(event: FormEvent) {
     event.preventDefault();
     const task = prompt.trim();
-    if (!task || isWorking || !canEditSession) return;
+    if (!task || !canSubmitTask) return;
+    const conversation = activeConversation.current;
     const team = selectedTeam;
     setMessages((items) => [...items, { role: "user", text: task }]);
     setPrompt("");
@@ -978,25 +1051,30 @@ export default function Home() {
     try {
       const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: task, preference: modelPreference, sessionId, projectId }) });
       const payload = await response.json() as AssistantPayload;
+      if (conversation !== activeConversation.current) return;
       if (!response.ok) {
-        setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "연결 설정 필요" }]);
+        setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "요청 실패", retryPrompt: task }]);
         return;
       }
       addAssistantResult(payload, team);
     } catch {
-      setMessages((items) => [...items, { role: "assistant", text: "실제 모델 백엔드에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.", models: "연결 오류" }]);
+      if (conversation === activeConversation.current) {
+        setMessages((items) => [...items, { role: "assistant", text: "모델에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.", models: "연결 오류", retryPrompt: task }]);
+      }
     } finally {
-      setIsWorking(false);
+      if (conversation === activeConversation.current) setIsWorking(false);
     }
   }
 
   async function resolveToolApproval(approval: ApprovalRequest, decision: "approve" | "reject") {
-    if (isWorking || !canEditSession || approval.status === "approved" || approval.status === "rejected") return;
+    if (!canSubmitTask || approval.status === "approved" || approval.status === "rejected") return;
+    const conversation = activeConversation.current;
     setIsWorking(true);
     setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "running" } } : message));
     try {
       const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approvalId: approval.id, decision }) });
       const payload = await response.json() as AssistantPayload;
+      if (conversation !== activeConversation.current) return;
       if (!response.ok) {
         setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "pending" } } : message));
         setMessages((items) => [...items, { role: "assistant", text: assistantGuidance(payload), models: "승인 처리 오류" }]);
@@ -1005,14 +1083,21 @@ export default function Home() {
       setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: decision === "approve" ? "approved" : "rejected" } } : message));
       addAssistantResult(payload, "Terracotta Auto");
     } catch {
+      if (conversation !== activeConversation.current) return;
       setMessages((items) => items.map((message) => message.approval?.id === approval.id ? { ...message, approval: { ...message.approval, status: "pending" } } : message));
       setMessages((items) => [...items, { role: "assistant", text: "승인 요청을 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.", models: "연결 오류" }]);
     } finally {
-      setIsWorking(false);
+      if (conversation === activeConversation.current) setIsWorking(false);
     }
   }
 
+  function fillComposer(text: string) {
+    setPrompt(text);
+    composerRef.current?.focus();
+  }
+
   function handleComposerKey(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
@@ -1132,42 +1217,30 @@ export default function Home() {
     return { left: `${position.x}%`, top: `${position.y}%`, zIndex: Math.round(2 + position.y / 10) };
   }
 
-  async function newChat(targetProjectId: string | null = projectId) {
-    setMessages([]);
-    setPrompt("");
-    setMobileMenu(false);
-    setSessionTitle("새 작업");
-    setLastContextProvider(null);
-    setProjectId(targetProjectId);
-    try {
-      const response = await fetch("/api/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "new", projectId: targetProjectId }) });
-      if (!response.ok) throw new Error("new context unavailable");
-      applyContextPayload(await response.json() as ContextPayload);
-    } catch {
-      setSessionId(`new-${Date.now()}`);
-    }
+  function newChat(targetProjectId: string | null = projectId) {
+    return loadWorkContext({ create: true, projectId: targetProjectId });
   }
 
   return (
     <main className="app-frame">
-      <aside className={`sidebar ${mobileMenu ? "open" : ""}`}>
+      <aside id="workspace-navigation" aria-label="작업실 메뉴" onKeyDown={handleNavigationKey} className={`sidebar ${mobileMenu ? "open" : ""}`}>
         <div className="sidebar-top">
           <button className="wordmark" onClick={() => void newChat()} aria-label="테라코타 홈">
             <TerracottaMark /> Terracotta
           </button>
-          <button className="sidebar-close" onClick={() => setMobileMenu(false)} aria-label="메뉴 닫기">×</button>
+          <button className="sidebar-close" ref={menuCloseRef} onClick={dismissNavigation} aria-label="메뉴 닫기">×</button>
         </div>
 
         <button className="new-chat" onClick={() => void newChat()}><span>＋</span> {activeProject ? `${activeProject.name} 새 대화` : "새 대화"}</button>
 
         <nav className="sidebar-nav" aria-label="주요 메뉴">
-          <button className="active" onClick={() => setMobileMenu(false)}><span>○</span> 대화</button>
-          <button onClick={() => openProjectWorkspace()}><span>▦</span> 프로젝트</button>
-          <button onClick={() => { setGardenOpen(true); setMobileMenu(false); }}><span>♧</span> 테라코타 가든</button>
-          <button onClick={openMcpHub}><span>⌁</span> MCP 연결</button>
-          <button onClick={openLocalAgent}><span>›_</span> 로컬 터미널</button>
-          <button onClick={openModelLab}><span>◫</span> 모델 연구소</button>
-          <button onClick={() => { setSettingsOpen(true); setMobileMenu(false); }}><span>⌘</span> 모델 및 구독</button>
+          <button className="active" onClick={dismissNavigation}><PixelIcon name="chat" /> 대화</button>
+          <button onClick={() => openProjectWorkspace()}><PixelIcon name="folder" /> 프로젝트</button>
+          <button onClick={() => { setGardenOpen(true); dismissNavigation(); }}><PixelIcon name="sprout" /> 테라코타 가든</button>
+          <button onClick={openMcpHub}><PixelIcon name="link" /> MCP 연결</button>
+          <button onClick={openLocalAgent}><PixelIcon name="terminal" /> 로컬 터미널</button>
+          <button onClick={openModelLab}><PixelIcon name="chart" /> 모델 연구소</button>
+          <button onClick={() => { setSettingsOpen(true); dismissNavigation(); }}><PixelIcon name="sliders" /> 모델 및 구독</button>
         </nav>
 
         <div className="project-sidebar">
@@ -1181,43 +1254,52 @@ export default function Home() {
         <div className="recents">
           <p>{activeProject ? `${activeProject.name} 대화` : "일반 대화"}</p>
           {visibleRecentSessions.length ? visibleRecentSessions.map((session) => (
-            <button className={session.id === sessionId ? "active" : ""} key={session.id} onClick={() => void loadWorkContext(session.id)}>{session.title}{session.role && session.role !== "owner" ? " · 공유됨" : ""}</button>
+            <button className={session.id === sessionId ? "active" : ""} aria-current={session.id === sessionId ? "page" : undefined} key={session.id} onClick={() => void loadWorkContext({ sessionId: session.id })}>{session.title}{session.role && session.role !== "owner" ? " · 공유됨" : ""}</button>
           )) : <small>{contextLoading ? "기억을 불러오는 중…" : "이 프로젝트에 아직 대화가 없어요."}</small>}
         </div>
 
         <div className="sidebar-account">
-          <span>LK</span>
+          <span className="account-sprout" aria-hidden="true"><PixelIcon name="sprout" /></span>
           <div><b>내 테라코타</b><small>{sparks.toLocaleString()} Sparks</small></div>
-          <button aria-label="계정 메뉴">•••</button>
+          <button onClick={() => { setSettingsOpen(true); dismissNavigation(); }} aria-label="모델 및 구독 설정 열기">•••</button>
         </div>
       </aside>
 
-      {mobileMenu && <button className="sidebar-scrim" onClick={() => setMobileMenu(false)} aria-label="메뉴 닫기" />}
+      {mobileMenu && <button className="sidebar-scrim" type="button" tabIndex={-1} onClick={dismissNavigation} aria-label="메뉴 닫기" />}
 
       <section className="chat-panel">
         <header className="chat-header">
-          <button className="mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="메뉴 열기">☰</button>
+          <button className="mobile-menu-button" ref={menuTriggerRef} onClick={() => setMobileMenu(true)} aria-expanded={mobileMenu} aria-controls="workspace-navigation" aria-label="메뉴 열기">☰</button>
           <button className="model-switch" onClick={() => setSettingsOpen(true)}>
-            Terracotta Auto · {preferenceLabel} <span>⌄</span>
+            <b className="model-brand-wide">Terracotta Auto</b><b className="model-brand-compact">자동</b> · {preferenceLabel} <span>⌄</span>
           </button>
           <button className={`project-scope ${activeProject ? "active" : ""}`} onClick={() => openProjectWorkspace(activeProject?.id ?? null)}><i style={{ background: activeProject?.color ?? "#b8b8b1" }} />{activeProject?.name ?? "일반 대화"}<span>⌄</span></button>
           <span className="private-state"><i /> GPT · Claude · Gemini 공용 기억</span>
+          <button className="mobile-garden" onClick={() => setGardenOpen(true)} aria-label="테라코타 가든 열기"><PixelIcon name="sprout" /></button>
         </header>
 
         <div className={`conversation ${messages.length ? "has-messages" : ""}`}>
           {messages.length === 0 ? (
             <div className="empty-state">
-              <span className="hello-seed"><TerracottaMark size="large" /></span>
-              <h1>무엇을 도와드릴까요?</h1>
-              <p>필요한 모델은 제가 알아서 고를게요.</p>
+              <div className="greenhouse-welcome">
+                <div className="welcome-copy">
+                  <h1>무엇을 <span>도와드릴까요?</span></h1>
+                  <p>필요한 모델은 제가 알아서 고를게요.</p>
+                </div>
+                <div className="greenhouse-scene" role="img" aria-label="햇살 아래 화분과 새싹이 자라는 픽셀 온실" />
+              </div>
+              <h2 className="prompt-heading">이렇게 시작해 보세요</h2>
               <div className="quick-prompts">
-                {quickPrompts.map((item) => (
-                  <button key={item} onClick={() => setPrompt(item)}>{item}<span>↗</span></button>
+                {quickPrompts.map(({ title, prompt: suggestion, icon }) => (
+                  <button key={title} onClick={() => fillComposer(suggestion)}>
+                    <span className="prompt-title"><PixelIcon name={icon} />{title}</span>
+                    <span className="prompt-example">{suggestion}</span>
+                  </button>
                 ))}
               </div>
             </div>
           ) : (
-            <div className="message-list">
+            <div className="message-list" role="log" aria-label="대화 기록" aria-relevant="additions">
               {messages.map((message, index) => (
                 <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
                   {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
@@ -1236,12 +1318,13 @@ export default function Home() {
                         ))}
                         <p>승인하면 위 내용 그대로 실행하며, 인자 변경은 허용하지 않아요.</p>
                         <div className="tool-approval-actions">
-                          <button type="button" className="approve" disabled={isWorking || !canEditSession || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
-                          <button type="button" disabled={isWorking || !canEditSession || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
+                          <button type="button" className="approve" disabled={!canSubmitTask || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
+                          <button type="button" disabled={!canSubmitTask || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
                         </div>
                       </section>
                     )}
-                    {message.models && <small>{message.models}{message.approval ? "" : "로 함께 작업함 · 가든 +1"}</small>}
+                    {message.models && <small>{message.models}</small>}
+                    {message.retryPrompt && <button className="retry-prompt" type="button" onClick={() => fillComposer(message.retryPrompt!)}>질문 다시 편집</button>}
                   </div>
                 </article>
               ))}
@@ -1256,10 +1339,16 @@ export default function Home() {
         </div>
 
         <div className="composer-wrap">
+          {failedContext && (
+            <div className="context-feedback" role="alert">
+              <span>{failedContext.create ? "새 대화를 만들지 못했어요." : "대화 기록을 불러오지 못했어요."}</span>
+              <button type="button" onClick={() => void loadWorkContext(failedContext)}>다시 시도</button>
+            </div>
+          )}
           <div className="context-bridge" aria-label="모델 공용 작업 기억">
             <div className="context-bridge-copy">
               <i />
-              <span><b>{activeProject ? `${activeProject.name} / ${sessionTitle}` : sessionTitle}</b><small>{pendingTeamHandoff
+              <span><b aria-live="polite">{contextLoading ? "대화를 여는 중…" : activeProject ? `${activeProject.name} / ${sessionTitle}` : sessionTitle}</b><small>{pendingTeamHandoff
                 ? `${pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요`
                 : teamMembers.length > 1
                   ? `팀 작업 · ${teamMembers.length}명 · ${sessionRole === "viewer" ? "보기 전용" : "편집 가능"}`
@@ -1279,6 +1368,7 @@ export default function Home() {
           </div>
           <form className="composer" onSubmit={submitTask}>
             <textarea
+              ref={composerRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handleComposerKey}
@@ -1290,10 +1380,10 @@ export default function Home() {
             <div className="composer-actions">
               <div>
                 <button type="button" aria-label="프로젝트 파일" onClick={() => openProjectWorkspace(activeProject?.id ?? null, activeProject ? "files" : "overview")}>＋</button>
-                <button type="button" aria-label="웹 검색">◎</button>
+                <button type="button" aria-label="웹 검색 요청 추가" title="웹 검색 요청 추가" onClick={() => fillComposer(prompt.trim() ? `${prompt.trimEnd()}\n웹에서 최신 자료를 찾아 출처와 함께 알려줘.` : "웹에서 최신 자료를 찾아 출처와 함께 알려줘. 주제는 ")}>◎</button>
               </div>
               <span>{selectedTeam}</span>
-              <button className="send-button" disabled={!prompt.trim() || isWorking || !canEditSession} aria-label="메시지 보내기">↑</button>
+              <button className="send-button" disabled={!prompt.trim() || !canSubmitTask} aria-label="메시지 보내기">↑</button>
             </div>
           </form>
           <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
@@ -1322,11 +1412,11 @@ export default function Home() {
           <span>{fullLawn ? "잔디 한 판 완성" : `잔디 ${groundTiles.length}/20`}</span>
           <button onClick={() => setGardenOpen(true)}>가꾸기</button>
         </div>
+        <progress className="garden-progress" value={groundTiles.length} max={20} aria-label="심은 잔디" />
       </aside>
 
       {teamOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setTeamOpen(false)}>
-          <section className="dialog team-dialog" role="dialog" aria-modal="true" aria-label="팀 작업 공유" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="팀 작업 공유" panelClass="team-dialog" onDismiss={() => setTeamOpen(false)}>
             <button className="dialog-close" onClick={() => setTeamOpen(false)} aria-label="닫기">×</button>
             <header><p>Team handoff</p><h2>같은 작업을 함께 키우기</h2><span>팀원도 같은 GPT·Claude·Gemini 기록과 도구 결과에서 바로 이어갈 수 있어요.</span></header>
 
@@ -1380,13 +1470,11 @@ export default function Home() {
                 {teamHandoffs.slice(0, 4).map((handoff) => <p key={handoff.id}><span>{handoff.fromEmail} → {handoff.toEmail}</span><b>{handoff.status === "accepted" ? "이어받음" : "대기 중"}</b></p>)}
               </section>
             )}
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
 
       {gardenOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setGardenOpen(false)}>
-          <section className="dialog garden-dialog" role="dialog" aria-modal="true" aria-label="테라코타 가든" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="테라코타 가든" panelClass="garden-dialog" onDismiss={() => setGardenOpen(false)}>
             <button className="dialog-close" onClick={() => setGardenOpen(false)} aria-label="닫기">×</button>
             <header><p>Terracotta Garden</p><h2>내 지식 정원</h2><span>{gardenNote}</span></header>
             <p className="drag-help">잔디는 지면에 한 칸씩 심고, 장식과 테라 캐릭터는 타일과 상관없이 어디든 자유롭게 끌 수 있어요. 방향키로도 미세 조정됩니다.</p>
@@ -1492,13 +1580,11 @@ export default function Home() {
               })}
             </div>
             <p className="device-note">정원은 현재 기기에 저장됩니다.</p>
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
 
       {mcpOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setMcpOpen(false)}>
-          <section className="dialog mcp-dialog" role="dialog" aria-modal="true" aria-label="MCP 연결" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="MCP 연결" panelClass="mcp-dialog" onDismiss={() => setMcpOpen(false)}>
             <button className="dialog-close" onClick={() => setMcpOpen(false)} aria-label="닫기">×</button>
             <header className="mcp-header">
               <TerracottaMark size="large" />
@@ -1570,13 +1656,11 @@ export default function Home() {
             </form>
 
             <p className="mcp-security"><span>✓</span> OAuth 2.1 · PKCE S256 · 토큰 암호화 저장 · 내부 네트워크 주소 차단</p>
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
 
       {projectOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setProjectOpen(false)}>
-          <section className="dialog project-dialog" role="dialog" aria-modal="true" aria-label="프로젝트 워크스페이스" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="프로젝트 워크스페이스" panelClass="project-dialog" onDismiss={() => setProjectOpen(false)}>
             <button className="dialog-close" onClick={() => setProjectOpen(false)} aria-label="닫기">×</button>
             <header><p>Terracotta Projects</p><h2>프로젝트별로 기억하고, 파일까지 작업</h2><span>대화·모델 인계·프로젝트 지침·로컬 파일·실행 기록을 한 범위로 묶습니다.</span></header>
 
@@ -1649,13 +1733,11 @@ export default function Home() {
                 <p className="project-note">{projectNote}</p>
               </div>
             </div>
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
 
       {localAgentOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setLocalAgentOpen(false)}>
-          <section className="dialog local-agent-dialog" role="dialog" aria-modal="true" aria-label="로컬 터미널 연결" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="로컬 터미널 연결" panelClass="local-agent-dialog" onDismiss={() => setLocalAgentOpen(false)}>
             <button className="dialog-close" onClick={() => setLocalAgentOpen(false)} aria-label="닫기">×</button>
             <header>
               <p>Terracotta Local Agent</p>
@@ -1720,13 +1802,11 @@ export default function Home() {
                 ))}
               </section>
             )}
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
 
       {modelLabOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setModelLabOpen(false)}>
-          <section className="dialog model-lab-dialog" role="dialog" aria-modal="true" aria-label="모델 연구소" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="모델 연구소" panelClass="model-lab-dialog" onDismiss={() => setModelLabOpen(false)}>
             <button className="dialog-close" onClick={() => setModelLabOpen(false)} aria-label="닫기">×</button>
             <header className="model-lab-header">
               <div><p>Model intelligence</p><h2>최근 모델, 한눈에 비교</h2><span>순위 하나보다 실제 작업 적합도와 비용까지 같이 봅니다.</span></div>
@@ -1799,13 +1879,11 @@ export default function Home() {
             </div>
 
             {modelInsights && <div className="model-lab-sources"><p>{modelInsights.caveat}</p><div><span>출처</span>{modelInsights.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" title={source.note} key={source.name}>{source.name} ↗</a>)}</div></div>}
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
 
       {settingsOpen && (
-        <div className="overlay" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
-          <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-label="모델 및 구독" onMouseDown={(event) => event.stopPropagation()}>
+        <WorkspaceDialog label="모델 및 구독" panelClass="settings-dialog" onDismiss={() => setSettingsOpen(false)}>
             <button className="dialog-close" onClick={() => setSettingsOpen(false)} aria-label="닫기">×</button>
             <header><p>Model router · 2026.07</p><h2>Terracotta Auto</h2><span>작업에 맞는 모델을 고르고, GPT·Claude·Gemini의 우선순위는 내가 정합니다.</span></header>
 
@@ -1844,10 +1922,10 @@ export default function Home() {
             <section className="settings-section pricing-section" aria-labelledby="pricing-title">
               <div className="settings-heading"><div><h3 id="pricing-title">구독 출시 가안</h3><p>모든 플랜에서 GPT, Claude, Gemini, Perplexity, Higgsfield를 사용할 수 있어요.</p></div><span>월간 · VAT 별도</span></div>
               <div className="cost-benchmarks">
-                <span><b>GPT-5.6 Sol</b><small>$5 입력 · $30 출력 / 1M</small></span>
-                <span><b>Claude Fable 5</b><small>$10 입력 · $50 출력 / 1M</small></span>
-                <span><b>Claude Sonnet 5</b><small>$2 입력 · $10 출력 / 1M*</small></span>
-                <span><b>Gemini 3.6 Flash</b><small>$1.50 입력 · $7.50 출력 / 1M</small></span>
+                <span><b>GPT-6.2 Sol</b><small>$2 입력 · $10 출력 / 1M</small></span>
+                <span><b>Claude Fable 5.2</b><small>$8 입력 · $40 출력 / 1M</small></span>
+                <span><b>Claude Sonnet 5.5</b><small>$2 입력 · $10 출력 / 1M</small></span>
+                <span><b>Gemini 4 Hydrogen</b><small>$1.50 입력 · $7.50 출력 / 1M</small></span>
                 <span><b>Sonar Pro</b><small>$3 입력 · $15 출력 / 1M + 검색</small></span>
                 <span><b>Higgsfield</b><small>$9 · $49 · $129 크레딧 플랜</small></span>
               </div>
@@ -1862,12 +1940,11 @@ export default function Home() {
                   </article>
                 ))}
               </div>
-              <p className="pricing-note">짧은 텍스트는 적게, 심층 리서치·영상·Fable 5 최고 난도 작업은 많이 차감됩니다. 소비자용 구독을 재판매하는 금액이 아니라 API·생성 크레딧, 환율 버퍼, 라우팅·개인 메모리·저장 비용을 포함한 출시 가격입니다. *Sonnet 5의 프로모션 가격은 2026년 8월 31일까지이며 이후 원가 예산에 $3/$15 단가를 반영합니다.</p>
-              <div className="pricing-sources"><span>공식 가격 확인</span><a href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer">OpenAI</a><a href="https://www.anthropic.com/news/claude-sonnet-5" target="_blank" rel="noreferrer">Anthropic</a><a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noreferrer">Google Gemini</a><a href="https://docs.perplexity.ai/docs/getting-started/pricing" target="_blank" rel="noreferrer">Perplexity</a><a href="https://higgsfield.ai/pricing" target="_blank" rel="noreferrer">Higgsfield</a></div>
+              <p className="pricing-note">모델 단가는 기본 입력·출력 토큰 100만 개 기준입니다. 표의 월 구독료는 API 사용료와 생성 크레딧, 환율 변동, 개인 메모리 저장 비용을 고려한 가안입니다.</p>
+              <div className="pricing-sources"><span>공식 가격 확인</span><a href="https://developers.openai.com/api/docs/models/gpt-6.2-sol" target="_blank" rel="noreferrer">OpenAI</a><a href="https://platform.claude.com/docs/en/about-claude/pricing" target="_blank" rel="noreferrer">Anthropic</a><a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noreferrer">Google Gemini</a><a href="https://docs.perplexity.ai/docs/getting-started/pricing" target="_blank" rel="noreferrer">Perplexity</a><a href="https://higgsfield.ai/pricing" target="_blank" rel="noreferrer">Higgsfield</a></div>
             </section>
             <button className="settings-save" onClick={() => setSettingsOpen(false)}>확인</button>
-          </section>
-        </div>
+        </WorkspaceDialog>
       )}
     </main>
   );

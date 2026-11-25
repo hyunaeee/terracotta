@@ -22,17 +22,67 @@ function returnPath(url: URL, value = url.searchParams.get("returnTo") ?? "/") {
   return target.pathname + target.search;
 }
 
-function loginForm(action: string, invalidPassword = false) {
-  // Actions are generated from fixed paths and URLSearchParams.
+const pixelSprout = `<svg viewBox="0 0 96 40" aria-hidden="true" focusable="false" shape-rendering="crispEdges">
+  <rect width="96" height="40" fill="#e7eedb"/>
+  <path fill="#d2dfc5" d="M0 0h96v2H0zM12 0h2v33h-2zM35 0h2v33h-2zM59 0h2v33h-2zM82 0h2v33h-2zM0 12h96v2H0z"/>
+  <path fill="#fff6cf" d="M71 4h4v1h2v4h-2v1h-4V9h-2V5h2z"/>
+  <path fill="#bd9a79" d="M0 32h96v2H0z"/><path fill="#d4bba0" d="M0 34h96v6H0z"/>
+  <path fill="#47705a" d="M47 26V16h-4v-2h-3v-5h5v2h3v3h1v-2h2V9h3V7h5v4h-2v3h-3v2h-4v10z"/>
+  <path fill="#82a46f" d="M40 9h5v2h3v2h-4v-2h-4zm14 0h4v2h-4v2h-3v-2h3z"/>
+  <path fill="#784931" d="M38 21h21v5h-2v5h-2v3H42v-3h-2v-5h-2z"/>
+  <path fill="#bd7054" d="M40 23h17v2H40zm2 4h13v4h-2v1h-9v-1h-2z"/>
+  <path fill="#382e25" d="M45 27h1v2h-1zm6 0h1v2h-1z"/>
+</svg>`;
+
+function vercelLoginPath(target: string) {
+  return LOGIN_PATH + "?" + new URLSearchParams({ start: "1", returnTo: target });
+}
+
+function ownerPage(mode: "vercel" | "password" | "logout", action: string, status = 200) {
+  // The only dynamic URL consists of a fixed path and an encoded URLSearchParams query.
   const safeAction = action.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-  const logout = action === LOGOUT_PATH;
-  const title = logout ? "로그아웃" : "Terracotta 로그인";
-  const field = logout ? "" : '<label>비밀번호<input name="password" type="password" autocomplete="current-password" required autofocus maxlength="256"></label>';
-  const error = invalidPassword ? '<p role="alert">비밀번호를 다시 확인해 주세요.</p>' : "";
-  const html = `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>
-    *{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;background:#f8f5ee;color:#302b25;font:16px/1.5 system-ui,sans-serif}main{width:min(26rem,100%);padding:2rem}h1{font-size:1.75rem}label{display:grid;gap:.5rem}input,button{font:inherit;border-radius:.4rem;padding:.65rem .8rem}input{width:100%;border:1px solid #82776d}button{margin-top:1rem;background:#73432e;color:white;border:0;cursor:pointer}p{color:#913d27}
-    </style></head><body><main><h1>${title}</h1><form method="post" action="${safeAction}">${field}${error}<button>${logout ? "로그아웃" : "로그인"}</button></form></main></body></html>`;
-  return new Response(html, { status: invalidPassword ? 401 : 200, headers: {
+  const title = mode === "logout" ? "작업실에서 로그아웃" : "Terracotta 작업실";
+  const descriptions = {
+    vercel: "등록된 Vercel 계정으로 로그인해 대화와 정원을 이어가세요.",
+    password: "소유자 비밀번호로 로그인해 대화와 정원을 이어가세요.",
+    logout: "이 브라우저의 작업실 세션을 종료합니다.",
+  };
+  let control: string;
+  if (mode === "vercel") {
+    const error = status === 403 ? '<p role="alert">작업실 소유자의 Vercel 계정으로 다시 로그인해 주세요.</p>' : "";
+    control = `${error}<a class="action" href="${safeAction}">Vercel로 로그인</a>`;
+  } else if (mode === "password") {
+    const invalid = status === 401;
+    control = `<form method="post" action="${safeAction}">
+      <label for="password">비밀번호</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256"${invalid ? ' aria-invalid="true" aria-describedby="password-error"' : ""}>
+      ${invalid ? '<p id="password-error" role="alert">비밀번호를 다시 확인해 주세요.</p>' : ""}
+      <button class="action" type="submit">로그인</button>
+    </form>`;
+  } else {
+    control = `<form method="post" action="${safeAction}"><button class="action" type="submit">로그아웃</button></form>`;
+  }
+  const html = `<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; min-height: 100svh; padding: 1rem; display: grid; place-items: center; color: #28352b; background: #f6f3e9; font: 1rem/1.6 system-ui, sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
+  main { width: min(100%, 24rem); background: #fffdf7; border: 1px solid #a9aa93; box-shadow: 4px 4px #dfd9c8; }
+  svg { display: block; width: 100%; height: auto; border-bottom: 1px solid #a9aa93; }
+  .content { padding: clamp(1.25rem, 7vw, 2rem); }
+  h1 { margin: 0; font-size: clamp(1.5rem, 6vw, 2rem); line-height: 1.25; letter-spacing: -.04em; }
+  p { margin: .65rem 0 1.35rem; color: #52604f; }
+  form { display: grid; gap: .5rem; }
+  label { font-weight: 600; }
+  input, .action { width: 100%; min-height: 2.85rem; padding: .6rem .8rem; border-radius: 3px; font: inherit; }
+  input { border: 1px solid #77836f; color: inherit; background: #fff; }
+  .action { display: grid; place-items: center; border: 1px solid #314d36; background: #395a40; color: #fff; font-weight: 650; text-align: center; text-decoration: none; cursor: pointer; }
+  form .action { margin-top: .3rem; }
+  .action:hover { background: #2d4934; }
+  :focus-visible { outline: 3px solid #234da0; outline-offset: 3px; }
+  [role=alert] { margin: 0 0 .75rem; color: #923d28; }
+</style></head><body><main>${pixelSprout}<div class="content"><h1>${title}</h1><p>${descriptions[mode]}</p>${control}</div></main></body></html>`;
+  return new Response(html, { status, headers: {
     ...privateHeaders, "Content-Type": "text/html; charset=utf-8",
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   } });
@@ -149,9 +199,7 @@ export async function authorizePersonalRequest(request: Request, password: strin
       const session = await finishVercelSignIn(request, url, oidc);
       result = redirect(new URL(returnPath(url, session.returnTo), url.origin), sessionCookie(session.token, session.maxAge));
     } catch {
-      result = new Response('<!doctype html><html lang="ko"><meta charset="utf-8"><title>로그인 확인</title><p>개인 작업실 소유자의 Vercel 계정으로 다시 로그인해 주세요.</p><a href="/owner/login">다시 로그인</a></html>', {
-        status: 403, headers: { ...privateHeaders, "Content-Type": "text/html; charset=utf-8" },
-      });
+      result = ownerPage("vercel", vercelLoginPath("/"), 403);
     }
     result.headers.append("Set-Cookie", clearFlowCookie);
     return result;
@@ -160,20 +208,21 @@ export async function authorizePersonalRequest(request: Request, password: strin
     const target = returnPath(url);
     if (oidc) {
       if (request.method !== "GET") return errorResponse(405, "지원하지 않는 요청입니다.");
+      if (url.searchParams.get("start") !== "1") return ownerPage("vercel", vercelLoginPath(target));
       const flow = await startVercelSignIn(url.origin, oidc.clientId!, target);
       return redirect(flow.location, flow.cookie);
     }
     const action = LOGIN_PATH + "?" + new URLSearchParams({ returnTo: target });
-    if (read) return loginForm(action);
+    if (read) return ownerPage("password", action);
     if (request.method !== "POST") return errorResponse(405, "지원하지 않는 요청입니다.");
     if (request.headers.get("content-type")?.split(";")[0] !== "application/x-www-form-urlencoded") return errorResponse(415, "로그인 양식을 사용해 주세요.");
     if (Number(request.headers.get("content-length")) > 2048) return errorResponse(413, "로그인 요청이 너무 큽니다.");
     const attempt = new URLSearchParams(await request.text()).get("password") ?? "";
-    if (!await passwordMatches(attempt, password!)) return loginForm(action, true);
+    if (!await passwordMatches(attempt, password!)) return ownerPage("password", action, 401);
     return redirect(new URL(target, url.origin), await newSession(password!, url.origin));
   }
   if (path === LOGOUT_PATH) {
-    if (read) return loginForm(LOGOUT_PATH);
+    if (read) return ownerPage("logout", LOGOUT_PATH);
     if (request.method !== "POST") return errorResponse(405, "지원하지 않는 요청입니다.");
     return redirect(new URL(LOGIN_PATH, url.origin), sessionCookie("", 0));
   }

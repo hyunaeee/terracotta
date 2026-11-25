@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./garden-workspace.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -20,7 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: "TERRACOTTA — 지식이 자라는 AI",
       description: "무엇이든 물어보세요. 지식은 조용히 자랍니다.",
-      images: [{ url: new URL("/og-terracotta.png", base).toString(), width: 1732, height: 907, alt: "간결한 테라코타 대화와 작은 지식 가든" }],
+      images: [{ url: new URL("/og-terracotta.png", base).toString(), width: 1200, height: 630, alt: "테라코타 정원의 픽셀 온실" }],
     },
     twitter: {
       card: "summary_large_image",

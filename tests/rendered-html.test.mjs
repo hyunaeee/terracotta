@@ -141,9 +141,9 @@ test("adds a sourced, live-updating model intelligence lab", async () => {
   assert.match(css, /\.model-compare-table/);
   assert.match(intelligence, /lmarena-ai%2Fleaderboard-dataset/);
   assert.match(intelligence, /Artificial Analysis/);
-  assert.match(intelligence, /Claude Fable 5/);
-  assert.match(intelligence, /GPT-5\.6 Sol/);
-  assert.match(intelligence, /Gemini 3\.6 Flash/);
+  assert.match(intelligence, /Claude Fable 5\.2/);
+  assert.match(intelligence, /GPT-6\.2 Sol/);
+  assert.match(intelligence, /Gemini 4 Hydrogen/);
   assert.match(intelligence, /Perplexity Sonar Pro/);
   assert.match(intelligence, /Kimi K3/);
   assert.match(intelligence, /AbortSignal\.timeout/);
@@ -278,8 +278,8 @@ test("runs the current GPT flagship through a privacy-aware Responses API path",
     source("package.json"),
   ]);
 
-  assert.match(router, /model: "gpt-5\.6-sol"/);
-  assert.match(router, /input: 4_000_000, output: 20_000_000/);
+  assert.match(router, /model: "gpt-6\.2-sol"/);
+  assert.match(router, /input: 2_000_000, output: 10_000_000/);
   assert.match(router, /openAiTierRank/);
   assert.match(orchestrator, /store: false/);
   assert.match(orchestrator, /context: "current_turn"/);
@@ -345,7 +345,7 @@ test("routes Gemini through the live registry, Interactions API, and Docker runt
   ]);
 
   assert.match(router, /provider: "google"/);
-  assert.match(router, /gemini-3\.6-flash/);
+  assert.match(router, /gemini-4-hydrogen/);
   assert.match(router, /v1beta\/models\?pageSize=1000/);
   assert.match(router, /GEMINI_API_KEY/);
   assert.match(orchestrator, /invokeGeminiTurn/);

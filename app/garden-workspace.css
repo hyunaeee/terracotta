@@ -1,0 +1,132 @@
+/* The workspace uses the same soil, leaf and clay colours as the garden tiles. */
+:root {
+  --paper: #fffdf5;
+  --ink: #293a2c;
+  --muted: #606854;
+  --line: #d6d4bb;
+  --soft: #f2f2e2;
+  --moss: #365e3e;
+  --terracotta: #b95130;
+  --forest: #284b36;
+  --parchment: #f6f1de;
+}
+
+.app-frame { background: var(--paper); }
+.sidebar, .garden-rail { background: #f1efdf; }
+.sidebar { height: 100dvh; min-height: 0; overflow-y: auto; }
+.sidebar-top { min-height: 44px; }
+.wordmark { color: var(--forest); font-family: Georgia, serif; font-size: 24px; font-weight: 700; }
+.terracotta-mark { border-radius: 0; background: #f7e6c9; border-color: #d9c6a7; box-shadow: none; }
+.terracotta-mark .mark-leaf, .terracotta-mark .mark-pot, .terracotta-mark .mark-stem { border-radius: 0; transform: none; }
+.terracotta-mark .mark-pot { clip-path: polygon(0 0,100% 0,100% 35%,85% 35%,85% 75%,72% 75%,72% 100%,28% 100%,28% 75%,15% 75%,15% 35%,0 35%); }
+.terracotta-mark .mark-leaf { clip-path: polygon(0 0,70% 0,70% 24%,100% 24%,100% 100%,34% 100%,34% 72%,0 72%); }
+.terracotta-mark .mark-leaf-right { transform: scaleX(-1); }
+.pixel-icon { flex: 0 0 auto; }
+.new-chat {
+  background: var(--forest); color: #fff9e7; border: 1px solid #233d2b;
+  border-radius: 3px; box-shadow: 0 3px 0 #b6b998; font-weight: 700;
+}
+.new-chat:hover { background: #355d40; }
+.new-chat span { color: #d7e3b2; }
+.sidebar-nav button { border-radius: 3px; color: #495745; }
+.sidebar-nav button:hover, .sidebar-nav button.active { background: #dde3c6; color: #253f2c; }
+.sidebar-nav button.active { box-shadow: inset 3px 0 var(--moss); font-weight: 700; }
+.sidebar-nav .pixel-icon { color: #617954; }
+.sidebar-account > .account-sprout { border-radius: 2px; background: #e2e5c6; color: var(--forest); }
+
+.chat-panel { height: 100dvh; background: var(--paper); }
+.chat-header { min-width: 0; background: #fcfaee; }
+.private-state { color: var(--muted); }
+.mobile-garden { display: none; }
+.model-brand-wide, .model-brand-compact { font-weight: inherit; }
+.model-brand-compact { display: none; }
+.conversation { padding: clamp(18px, 3.5vh, 36px) clamp(16px, 2.3vw, 38px); }
+.conversation:not(.has-messages) { display: flex; flex-direction: column; align-items: center; }
+.empty-state { width: min(780px, 100%); padding: 0; margin-block: auto; text-align: left; }
+.greenhouse-welcome {
+  display: grid; grid-template-columns: minmax(0,.78fr) minmax(0,1.22fr);
+  overflow: hidden; border: 2px solid #48573b; border-radius: 3px;
+  color: #fff5d4; background: var(--forest); box-shadow: 3px 3px 0 #d9d2b3;
+}
+.welcome-copy { align-self: center; padding: clamp(16px, 2.4vw, 38px); }
+.empty-state .welcome-copy h1 { font-size: clamp(25px, 2.4vw, 42px); line-height: 1.24; letter-spacing: -.055em; font-weight: 750; word-break: keep-all; }
+.welcome-copy h1 span { display: block; }
+.welcome-copy p { margin: 15px 0 0; max-width: 21em; color: #dce4c9; font-size: 13px; line-height: 1.65; word-break: keep-all; }
+.greenhouse-scene {
+  min-height: 150px; aspect-ratio: 448 / 251; border-left: 2px solid #48573b;
+  background: #e3d59e url("/assets/garden/workspace-greenhouse.png") center / cover no-repeat;
+  image-rendering: pixelated;
+}
+.prompt-heading { margin: 23px 0 10px; color: var(--forest); font-size: 13px; font-weight: 750; }
+.quick-prompts { gap: 9px; }
+.quick-prompts button { display: flex; flex-direction: column; justify-content: center; gap: 7px; min-height: 79px; padding: 10px 13px; border-radius: 3px; background: #faf7e9; }
+.quick-prompts button:hover { border-color: #81916b; background: #eff0da; }
+.quick-prompts .prompt-title { display: flex; align-items: center; gap: 7px; color: var(--forest); font-size: 13px; font-weight: 700; }
+.quick-prompts .prompt-title svg { width: 16px; height: 16px; color: #9c5437; }
+.quick-prompts .prompt-example { color: #56604e; font-size: 12px; word-break: keep-all; }
+
+.composer-wrap { position: relative; inset: auto; flex: none; padding: 8px clamp(16px, 2.3vw, 38px) max(10px, env(safe-area-inset-bottom)); background: var(--paper); }
+.composer, .context-bridge { width: min(780px, 100%); }
+.composer { border: 1px solid #96a082; border-radius: 5px; box-shadow: 2px 3px 0 #e2ddc5; background: #fffef8; }
+.composer:focus-within { outline: 2px solid #59815b; outline-offset: 1px; }
+.composer textarea { background: transparent; field-sizing: content; }
+.composer textarea::placeholder { color: #717761; }
+.context-bridge { border-radius: 3px; border-color: var(--line); background: #f3f3e4; }
+.context-bridge-copy b { font-size: 12px; }
+.context-bridge-copy small { font-size: 10px; color: var(--muted); }
+.context-bridge-actions { min-width: 0; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }
+.context-bridge-actions button { padding-inline: 5px; font-size: 10px; color: #465b45; }
+.composer-wrap > p { color: var(--muted); }
+.composer-actions .send-button { border-radius: 3px; }
+.composer-actions .send-button:not(:disabled) { background: var(--forest); color: white; }
+.composer-actions > span { color: #636a57; }
+.message.user > div { background: #eeefd9; color: var(--ink); }
+.dialog { border-radius: 5px; }
+
+.garden-rail { min-width: 0; border-left-color: var(--line); }
+.garden-rail-head b { color: var(--forest); font-size: 16px; }
+.garden-rail-head span { font-size: 11px; }
+.garden-rail-head button { color: #536048; }
+.pixel-garden { border: 2px solid #697454; border-radius: 3px; box-shadow: 2px 3px 0 #cecaac; background: #e9e5c9; }
+.garden-rail-foot { align-items: center; padding-top: 13px; }
+.garden-rail-foot span, .garden-rail-foot button { font-size: 12px; }
+.garden-rail-foot button { min-height: 28px; padding: 0 9px; border: 1px solid #a9b190; border-radius: 2px; }
+.garden-progress { display: block; width: 100%; height: 5px; appearance: none; color: #718650; background: #dbdcc4; border: none; }
+.garden-progress::-webkit-progress-bar { background: #dbdcc4; }
+.garden-progress::-webkit-progress-value { background: #718650; }
+.garden-progress::-moz-progress-bar { background: #718650; }
+
+@media (min-width: 821px) and (max-width: 1130px) {
+  .app-frame { grid-template-columns: 190px minmax(0,1fr) 166px; }
+  .chat-header { gap: 6px; padding-inline: 14px; }
+  .private-state { display: none; }
+  .context-bridge { flex-wrap: wrap; }
+}
+@media (max-width: 820px) {
+  .sidebar { visibility: hidden; }
+  .sidebar.open { visibility: visible; }
+  .garden-rail { display: none; }
+  .mobile-garden { display: grid; place-items: center; flex: 0 0 36px; height: 36px; margin-left: auto; border: 1px solid #b4ba9b; border-radius: 3px; background: #e8ecd5; color: var(--forest); }
+  .private-state { display: none; }
+}
+@media (max-width: 560px) {
+  .chat-header { flex-basis: 50px; gap: 7px; }
+  .model-brand-wide { display: none; }
+  .model-brand-compact { display: inline; }
+  .composer-actions .send-button { margin-left: auto; }
+  .empty-state { padding-top: 0; }
+  .greenhouse-welcome { grid-template-columns: minmax(0,.88fr) minmax(0,1fr); }
+  .welcome-copy { padding: 12px; }
+  .empty-state .welcome-copy h1 { font-size: clamp(20px,5.5vw,28px); }
+  .welcome-copy p { margin-top: 8px; font-size: 11px; }
+  .greenhouse-scene { align-self: stretch; min-height: 128px; aspect-ratio: auto; background-position: 69% center; }
+  .prompt-heading { margin-top: 17px; }
+  .quick-prompts { gap: 5px; }
+  .quick-prompts button { flex-direction: row; align-items: center; justify-content: flex-start; min-height: 44px; padding: 7px 10px; }
+  .quick-prompts .prompt-title { flex-shrink: 0; min-width: 95px; font-size: 12px; }
+  .quick-prompts .prompt-example { font-size: 11px; }
+  .context-bridge { flex-wrap: wrap; gap: 2px 5px; padding: 4px 6px; }
+  .context-bridge-actions { justify-content: flex-start; gap: 2px; }
+  .context-bridge-actions button { min-height: 26px; font-size: 10px; }
+  .composer-wrap { padding-inline: 12px; }
+}

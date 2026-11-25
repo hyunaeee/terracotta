@@ -47,11 +47,14 @@ const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS owner_settings (owner_id TEXT PRIMARY KEY NOT NULL, model_preference TEXT DEFAULT 'latest' NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL)`,
 ];
 
+const openAiDefault = { provider: "openai" as const, model: "gpt-6.2-sol", name: "GPT-6.2 Sol", rank: 602, input: 2_000_000, output: 10_000_000 };
+const claudeDefault = { provider: "anthropic" as const, model: "claude-fable-5-2", name: "Claude Fable 5.2", rank: 502, input: 8_000_000, output: 40_000_000 };
+const geminiDefault = { provider: "google" as const, model: "gemini-4-hydrogen", name: "Gemini 4 Hydrogen", rank: 400, input: 1_500_000, output: 7_500_000 };
 const seeds = [
-  { provider: "openai" as const, model: "gpt-5.6-sol", name: "GPT-5.6 Sol", rank: 560, input: 4_000_000, output: 20_000_000 },
-  { provider: "anthropic" as const, model: "claude-fable-5", name: "Claude Fable 5", rank: 510, input: 10_000_000, output: 50_000_000 },
-  { provider: "anthropic" as const, model: "claude-sonnet-5", name: "Claude Sonnet 5", rank: 500, input: 3_000_000, output: 15_000_000 },
-  { provider: "google" as const, model: "gemini-3.6-flash", name: "Gemini 3.6 Flash", rank: 360, input: 1_500_000, output: 7_500_000 },
+  openAiDefault,
+  claudeDefault,
+  { provider: "anthropic" as const, model: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", rank: 505, input: 2_000_000, output: 10_000_000 },
+  geminiDefault,
   { provider: "perplexity" as const, model: "sonar-pro", name: "Perplexity Sonar Pro", rank: 100, input: 3_000_000, output: 15_000_000 },
   { provider: "higgsfield" as const, model: "higgsfield-mcp", name: "Higgsfield MCP", rank: 100, input: 0, output: 0 },
 ];
@@ -71,24 +74,31 @@ function rankVersion(id: string) {
 }
 
 function isOpenAiFrontier(id: string) {
-  return /^gpt-\d+(?:\.\d+)*(?:-(?:sol|terra|luna))?$/i.test(id) && !/(mini|nano|chat|codex|audio|realtime|search|image)/i.test(id);
+  return /^gpt-\d+(?:\.\d+)*(?:-(?:astra|sol|terra|luna))?$/i.test(id);
 }
 
 function openAiTierRank(id: string) {
-  if (/-sol$/i.test(id)) return 3;
+  if (/-sol$/i.test(id)) return 4;
+  if (/-astra$/i.test(id)) return 3;
   if (!/-(?:terra|luna)$/i.test(id)) return 2;
   if (/-terra$/i.test(id)) return 1;
   return 0;
 }
 
 function openAiDisplayName(id: string) {
-  const match = id.match(/^gpt-(\d+(?:\.\d+)*)(?:-(sol|terra|luna))?$/i);
+  const match = id.match(/^gpt-(\d+(?:\.\d+)*)(?:-(astra|sol|terra|luna))?$/i);
   if (!match) return id;
-  const tier = match[2] ?? "sol";
+  const tier = match[2];
+  if (!tier) return `GPT-${match[1]}`;
   return `GPT-${match[1]} ${tier[0].toUpperCase()}${tier.slice(1).toLowerCase()}`;
 }
 
 function openAiPrices(id: string) {
+  if ([openAiDefault.model, "gpt-6.1-sol", "gpt-6-sol"].includes(id)) return [openAiDefault.input, openAiDefault.output] as const;
+  if (id === "gpt-6.2-astra") return [8_000_000, 40_000_000] as const;
+  if (id === "gpt-6-astra") return [10_000_000, 50_000_000] as const;
+  if (id === "gpt-6.1-terra") return [1_000_000, 5_000_000] as const;
+  if (id === "gpt-6-luna") return [100_000, 500_000] as const;
   if (/-luna$/i.test(id)) return [200_000, 1_200_000] as const;
   if (/-terra$/i.test(id)) return [2_000_000, 12_000_000] as const;
   if (/^(?:gpt-5\.6|gpt-5\.6-sol)$/i.test(id)) return [4_000_000, 20_000_000] as const;
@@ -100,38 +110,52 @@ function isClaudeFrontier(id: string) {
 }
 
 function isGeminiFrontier(id: string, methods: string[] = []) {
-  return /^gemini-\d+(?:\.\d+)*-(?:flash|pro)$/i.test(id)
-    && !/(preview|latest|lite|live|image|embedding|audio|tts)/i.test(id)
+  return /^gemini-\d+(?:\.\d+)*-(?:flash|pro|hydrogen|neon|argon|carbon)$/i.test(id)
     && (!methods.length || methods.includes("generateContent"));
 }
 
-async function ensureDatabase(db: Database) {
-  await db.batch(schemaStatements.map((statement) => db.prepare(statement)));
-  await db.prepare("INSERT OR IGNORE INTO owner_settings (owner_id, model_preference) VALUES ('owner', 'latest')").run();
-  for (const seed of seeds) {
-    await db.prepare(`INSERT OR IGNORE INTO model_registry (key, provider, model_id, display_name, version_rank, is_routable, input_price_micros, output_price_micros, source) VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'official-seed')`)
-      .bind(`${seed.provider}:${seed.model}`, seed.provider, seed.model, seed.name, seed.rank, seed.input, seed.output).run();
-    const status = seed.provider === "higgsfield" ? "mcp_auth_required" : "needs_key";
-    await db.prepare("INSERT OR IGNORE INTO provider_sync (provider, status, current_model) VALUES (?, ?, ?)").bind(seed.provider, status, seed.model).run();
-  }
-  await db.prepare("UPDATE provider_sync SET current_model='gpt-5.6-sol', next_sync_at=NULL WHERE provider='openai' AND current_model='gpt-5.6' AND status='needs_key'").run();
-  await db.prepare("UPDATE provider_sync SET current_model='claude-fable-5', next_sync_at=NULL WHERE provider='anthropic' AND current_model='claude-sonnet-5' AND status='needs_key'").run();
+function geminiPrices(id: string) {
+  if (id === geminiDefault.model || id === "gemini-3.6-flash") return [geminiDefault.input, geminiDefault.output];
+  const today = new Date().toISOString().slice(0, 10);
+  if (id === "gemini-4-carbon" || id === "gemini-4-argon") return today < "2026-12-01" ? [2_000_000, 10_000_000] : [4_000_000, 20_000_000];
+  if (id === "gemini-3.8-flash") return today < "2027-01-01" ? [750_000, 3_750_000] : [1_500_000, 7_500_000];
+  return [3_000_000, 15_000_000];
 }
 
-async function setSyncState(db: Database, provider: ProviderId, status: string, currentModel: string | null, error: string | null) {
+async function ensureDatabase(db: Database) {
+  const statements = schemaStatements.map((statement) => db.prepare(statement));
+  statements.push(db.prepare("INSERT OR IGNORE INTO owner_settings (owner_id, model_preference) VALUES ('owner', 'latest')"));
+  for (const seed of seeds) {
+    statements.push(db.prepare(`INSERT OR IGNORE INTO model_registry (key, provider, model_id, display_name, version_rank, is_routable, input_price_micros, output_price_micros, source) VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'official-seed')`)
+      .bind(`${seed.provider}:${seed.model}`, seed.provider, seed.model, seed.name, seed.rank, seed.input, seed.output));
+    const status = seed.provider === "higgsfield" ? "mcp_auth_required" : "needs_key";
+    statements.push(db.prepare("INSERT OR IGNORE INTO provider_sync (provider, status, current_model) VALUES (?, ?, ?)").bind(seed.provider, status, seed.model));
+  }
+  statements.push(db.prepare("UPDATE provider_sync SET current_model=?, next_sync_at=NULL WHERE provider='openai' AND current_model IN ('gpt-5.6', 'gpt-5.6-sol') AND status='needs_key'").bind(openAiDefault.model));
+  statements.push(db.prepare("UPDATE provider_sync SET current_model=?, next_sync_at=NULL WHERE provider='anthropic' AND current_model IN ('claude-sonnet-5','claude-fable-5') AND status='needs_key'").bind(claudeDefault.model));
+  statements.push(db.prepare("UPDATE provider_sync SET current_model=?, next_sync_at=NULL WHERE provider='google' AND current_model='gemini-3.6-flash' AND status='needs_key'").bind(geminiDefault.model));
+  await db.batch(statements);
+}
+
+function syncState(db: Database, provider: ProviderId, status: string, currentModel: string | null, error: string | null = null) {
   const now = new Date();
   const next = new Date(now.getTime() + SIX_HOURS_MS);
-  await db.prepare(`INSERT INTO provider_sync (provider, status, current_model, last_synced_at, next_sync_at, error) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider) DO UPDATE SET status=excluded.status, current_model=excluded.current_model, last_synced_at=excluded.last_synced_at, next_sync_at=excluded.next_sync_at, error=excluded.error`)
-    .bind(provider, status, currentModel, now.toISOString(), next.toISOString(), error).run();
+  return db.prepare(`INSERT INTO provider_sync (provider, status, current_model, last_synced_at, next_sync_at, error) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider) DO UPDATE SET status=excluded.status, current_model=COALESCE(excluded.current_model, provider_sync.current_model), last_synced_at=excluded.last_synced_at, next_sync_at=excluded.next_sync_at, error=excluded.error`)
+    .bind(provider, status, currentModel, now.toISOString(), next.toISOString(), error);
 }
 
-async function upsertLiveModel(db: Database, model: Omit<RegistryRow, "is_routable" | "source">) {
-  await db.prepare(`INSERT INTO model_registry (key, provider, model_id, display_name, remote_created_at, version_rank, is_routable, input_price_micros, output_price_micros, source, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 'live-registry', CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET display_name=excluded.display_name, remote_created_at=excluded.remote_created_at, version_rank=excluded.version_rank, is_routable=1, input_price_micros=excluded.input_price_micros, output_price_micros=excluded.output_price_micros, source='live-registry', last_seen_at=CURRENT_TIMESTAMP`)
-    .bind(`${model.provider}:${model.model_id}`, model.provider, model.model_id, model.display_name, model.remote_created_at, model.version_rank, model.input_price_micros, model.output_price_micros).run();
+async function publishLiveModel(db: Database, model: Omit<RegistryRow, "is_routable" | "source">) {
+  const upsert = db.prepare(`INSERT INTO model_registry (key, provider, model_id, display_name, remote_created_at, version_rank, is_routable, input_price_micros, output_price_micros, source, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 'live-registry', CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET display_name=excluded.display_name, remote_created_at=excluded.remote_created_at, version_rank=excluded.version_rank, is_routable=1, input_price_micros=excluded.input_price_micros, output_price_micros=excluded.output_price_micros, source='live-registry', last_seen_at=CURRENT_TIMESTAMP`)
+    .bind(`${model.provider}:${model.model_id}`, model.provider, model.model_id, model.display_name, model.remote_created_at, model.version_rank, model.input_price_micros, model.output_price_micros);
+  await db.batch([
+    db.prepare("UPDATE model_registry SET is_routable=0 WHERE provider=? AND is_routable=1").bind(model.provider),
+    upsert,
+    syncState(db, model.provider, "connected", model.model_id),
+  ]);
 }
 
 async function syncOpenAi(db: Database, key?: string) {
-  if (!key) return setSyncState(db, "openai", "needs_key", "gpt-5.6-sol", null);
+  if (!key) return syncState(db, "openai", "needs_key", null).run();
   const response = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`OpenAI model registry returned ${response.status}`);
   const payload = await response.json() as { data?: Array<{ id: string; created?: number }> };
@@ -140,28 +164,31 @@ async function syncOpenAi(db: Database, key?: string) {
     .sort((a, b) => rankVersion(b.id) - rankVersion(a.id) || openAiTierRank(b.id) - openAiTierRank(a.id) || (b.created ?? 0) - (a.created ?? 0));
   const current = candidates[0];
   if (!current) throw new Error("OpenAI registry did not return a routable frontier model");
-  await db.prepare("UPDATE model_registry SET is_routable=0 WHERE provider='openai'").run();
   const prices = openAiPrices(current.id);
-  await upsertLiveModel(db, { provider: "openai", model_id: current.id, display_name: openAiDisplayName(current.id), remote_created_at: current.created ?? 0, version_rank: rankVersion(current.id), input_price_micros: prices[0], output_price_micros: prices[1] });
-  await setSyncState(db, "openai", "connected", current.id, null);
+  await publishLiveModel(db, { provider: "openai", model_id: current.id, display_name: openAiDisplayName(current.id), remote_created_at: current.created ?? 0, version_rank: rankVersion(current.id), input_price_micros: prices[0], output_price_micros: prices[1] });
 }
 
 async function syncAnthropic(db: Database, key?: string) {
-  if (!key) return setSyncState(db, "anthropic", "needs_key", "claude-fable-5", null);
+  if (!key) return syncState(db, "anthropic", "needs_key", null).run();
   const response = await fetch("https://api.anthropic.com/v1/models?limit=1000", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`Anthropic model registry returned ${response.status}`);
   const payload = await response.json() as { data?: Array<{ id: string; display_name?: string; created_at?: string }> };
   const candidates = (payload.data ?? []).filter((model) => isClaudeFrontier(model.id)).sort((a, b) => Date.parse(b.created_at ?? "") - Date.parse(a.created_at ?? "") || rankVersion(b.id) - rankVersion(a.id));
   const current = candidates[0];
   if (!current) throw new Error("Anthropic registry did not return a routable frontier model");
-  await db.prepare("UPDATE model_registry SET is_routable=0 WHERE provider='anthropic'").run();
-  const prices = /^claude-fable-5(?:$|-)/i.test(current.id) ? [10_000_000, 50_000_000] : /^claude-opus-4-8(?:$|-)/i.test(current.id) ? [5_000_000, 25_000_000] : /^claude-sonnet-5(?:$|-)/i.test(current.id) ? [3_000_000, 15_000_000] : [10_000_000, 60_000_000];
-  await upsertLiveModel(db, { provider: "anthropic", model_id: current.id, display_name: current.display_name ?? current.id, remote_created_at: Math.floor(Date.parse(current.created_at ?? "") / 1000) || 0, version_rank: rankVersion(current.id), input_price_micros: prices[0], output_price_micros: prices[1] });
-  await setSyncState(db, "anthropic", "connected", current.id, null);
+  const alias = current.id.replace(/-\d{8}$/, "");
+  const seed = seeds.find(item => item.model === alias);
+  const prices = seed ? [seed.input, seed.output] : ({
+    "claude-opus-5-5": [4_000_000, 20_000_000],
+    "claude-fable-5": [10_000_000, 50_000_000],
+    "claude-opus-4-8": [5_000_000, 25_000_000],
+    "claude-sonnet-5": [3_000_000, 15_000_000],
+  } as Record<string, number[]>)[alias] ?? [10_000_000, 60_000_000];
+  await publishLiveModel(db, { provider: "anthropic", model_id: current.id, display_name: current.display_name ?? current.id, remote_created_at: Math.floor(Date.parse(current.created_at ?? "") / 1000) || 0, version_rank: rankVersion(current.id), input_price_micros: prices[0], output_price_micros: prices[1] });
 }
 
 async function syncGoogle(db: Database, key?: string) {
-  if (!key) return setSyncState(db, "google", "needs_key", "gemini-3.6-flash", null);
+  if (!key) return syncState(db, "google", "needs_key", null).run();
   const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", {
     headers: { "x-goog-api-key": key },
     signal: AbortSignal.timeout(20_000),
@@ -178,42 +205,40 @@ async function syncGoogle(db: Database, key?: string) {
   const candidates = (payload.models ?? [])
     .map((model) => ({
       ...model,
-      id: model.baseModelId ?? model.name?.replace(/^models\//, "") ?? "",
+      id: model.name?.replace(/^models\//, "") ?? model.baseModelId ?? "",
     }))
     .filter((model) => isGeminiFrontier(model.id, model.supportedGenerationMethods))
-    .sort((a, b) => rankVersion(b.id) - rankVersion(a.id) || Number(b.id.endsWith("-pro")) - Number(a.id.endsWith("-pro")));
+    .sort((a, b) => rankVersion(b.id) - rankVersion(a.id) || Number(b.id === geminiDefault.model) - Number(a.id === geminiDefault.model) || Number(b.id.endsWith("-pro")) - Number(a.id.endsWith("-pro")) || a.id.localeCompare(b.id));
   const current = candidates[0];
   if (!current) throw new Error("Google Gemini registry did not return a routable stable model");
-  await db.prepare("UPDATE model_registry SET is_routable=0 WHERE provider='google'").run();
-  const exact = current.id === "gemini-3.6-flash";
-  await upsertLiveModel(db, {
+  const [inputPrice, outputPrice] = geminiPrices(current.id);
+  await publishLiveModel(db, {
     provider: "google",
     model_id: current.id,
     display_name: current.displayName ?? current.id,
     remote_created_at: 0,
     version_rank: rankVersion(current.id),
-    input_price_micros: exact ? 1_500_000 : 3_000_000,
-    output_price_micros: exact ? 7_500_000 : 15_000_000,
+    input_price_micros: inputPrice,
+    output_price_micros: outputPrice,
   });
-  await setSyncState(db, "google", "connected", current.id, null);
 }
 
 export async function syncProviderRegistry(force = false) {
   const env = runtimeEnv();
   const db = env.DB;
   await ensureDatabase(db);
-  const due = await db.prepare("SELECT COUNT(*) AS count FROM provider_sync WHERE next_sync_at IS NULL OR next_sync_at <= ?").bind(new Date().toISOString()).first<{ count: number }>();
-  if (!force && Number(due?.count ?? 0) === 0) return;
-
-  const jobs: Array<[ProviderId, () => Promise<void>]> = [
+  const due = await db.prepare("SELECT provider FROM provider_sync WHERE next_sync_at IS NULL OR next_sync_at <= ?").bind(new Date().toISOString()).all<{ provider: ProviderId }>();
+  const dueProviders = new Set(due.results.map(row => row.provider));
+  const jobs: Array<[ProviderId, () => Promise<unknown>]> = [
     ["openai", () => syncOpenAi(db, env.OPENAI_API_KEY)],
     ["anthropic", () => syncAnthropic(db, env.ANTHROPIC_API_KEY)],
     ["google", () => syncGoogle(db, env.GEMINI_API_KEY)],
-    ["perplexity", () => setSyncState(db, "perplexity", env.PERPLEXITY_API_KEY ? "connected" : "needs_key", "sonar-pro", null)],
-    ["higgsfield", () => setSyncState(db, "higgsfield", env.HIGGSFIELD_MCP_CONNECTED === "true" ? "mcp_connected" : "mcp_auth_required", "higgsfield-mcp", null)],
+    ["perplexity", () => syncState(db, "perplexity", env.PERPLEXITY_API_KEY ? "connected" : "needs_key", "sonar-pro").run()],
+    ["higgsfield", () => syncState(db, "higgsfield", env.HIGGSFIELD_MCP_CONNECTED === "true" ? "mcp_connected" : "mcp_auth_required", "higgsfield-mcp").run()],
   ];
   for (const [provider, job] of jobs) {
-    try { await job(); } catch (error) { await setSyncState(db, provider, "error", null, safeError(error)); }
+    if (!force && !dueProviders.has(provider)) continue;
+    try { await job(); } catch (error) { await syncState(db, provider, "error", null, safeError(error)).run(); }
   }
 }
 
@@ -366,11 +391,11 @@ export async function runAssistant(prompt: string, preference: ModelPreference) 
     const model = models.find((item) => item.provider === provider);
     try {
       const invocation = provider === "openai"
-        ? await invokeOpenAi(env.OPENAI_API_KEY!, model?.model_id ?? "gpt-5.6-sol", prompt)
+        ? await invokeOpenAi(env.OPENAI_API_KEY!, model?.model_id ?? openAiDefault.model, prompt)
         : provider === "anthropic"
-          ? await invokeAnthropic(env.ANTHROPIC_API_KEY!, model?.model_id ?? "claude-fable-5", prompt)
+          ? await invokeAnthropic(env.ANTHROPIC_API_KEY!, model?.model_id ?? claudeDefault.model, prompt)
           : provider === "google"
-            ? await invokeGemini(env.GEMINI_API_KEY!, model?.model_id ?? "gemini-3.6-flash", prompt)
+            ? await invokeGemini(env.GEMINI_API_KEY!, model?.model_id ?? geminiDefault.model, prompt)
             : await invokePerplexity(env.PERPLEXITY_API_KEY!, prompt);
       if (!invocation.text.trim()) throw new Error(`${provider} returned an empty response`);
       const costMicros = await recordUsage(env.DB, invocation, task, model);

@@ -50,6 +50,50 @@ test("a password session is origin-bound, expiring, signed and revoked by passwo
   assert.equal((await check(req("/api/context", { headers }))).status, 401);
 });
 
+test("password sign-in, validation feedback and logout share an accessible pixel landing", async () => {
+  const page = await check(req("/owner/login?returnTo=%2Fprojects"));
+  const markup = await page.text();
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.has("set-cookie"), false);
+  assert.match(markup, /<form method="post" action="\/owner\/login\?returnTo=%2Fprojects">/);
+  assert.match(markup, /<label for="password">비밀번호<\/label>/);
+  assert.match(markup, /autocomplete="current-password"/);
+  assert.match(markup, /shape-rendering="crispEdges"/);
+  const invalidPassword = await login("incorrect", "/projects");
+  assert.equal(invalidPassword.status, 401);
+  const feedback = await invalidPassword.text();
+  assert.match(feedback, /aria-invalid="true" aria-describedby="password-error"/);
+  assert.match(feedback, /id="password-error" role="alert"/);
+  const logout = await check(req("/owner/logout"));
+  assert.match(await logout.text(), /<form method="post" action="\/owner\/logout">/);
+  assert.equal(logout.headers.has("set-cookie"), false);
+});
+
+function vercelLink(html) {
+  const links = [...html.matchAll(/href="([^"]+)">Vercel로 로그인<\/a>/g)];
+  assert.equal(links.length, 1);
+  const url = new URL(links[0][1].replaceAll("&amp;", "&"), origin);
+  assert.equal(url.origin, origin);
+  assert.equal(url.pathname, "/owner/login");
+  assert.equal(url.searchParams.get("start"), "1");
+  return url;
+}
+
+test("the Vercel owner landing is private, self-contained and starts sign-in only on request", async () => {
+  const config = { clientId: "client", ownerId: "owner" };
+  const page = await authorizePersonalRequest(req("/owner/login?returnTo=%2Fowner%2Flogout"), undefined, [], config);
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.has("set-cookie"), false);
+  assert.equal(page.headers.has("location"), false);
+  assert.match(page.headers.get("cache-control"), /no-store/);
+  assert.match(page.headers.get("content-security-policy"), /default-src 'none'/);
+  const html = await page.text();
+  assert.match(html, /<html lang="ko">/);
+  assert.match(html, /shape-rendering="crispEdges"/);
+  assert.doesNotMatch(html, /<script|<img|type="password"/);
+  assert.equal(vercelLink(html).searchParams.get("returnTo"), "/");
+});
+
 test("login redirects stay on the personal deployment and logout clears its cookie", async () => {
   for (const target of ["https://other.example", "//other.example", "/.//other.example", "/owner/login"]) {
     assert.equal((await login(password, target)).headers.get("location"), origin + "/");
@@ -87,7 +131,10 @@ test("Vercel OIDC validates PKCE, state, nonce, token signature, audience, expir
   const { privateKey, publicKey } = await generateKeyPair("RS256");
   const config = { clientId: "client-123", ownerId: "user-123", keys: async () => publicKey };
   const gate = (path, options, auth = config) => authorizePersonalRequest(req(path, options), undefined, [], auth);
-  const start = await gate("/owner/login?returnTo=%2F%3Ftab%3Dgarden");
+  const landing = await gate("/owner/login?returnTo=%2F%3Ftab%3Dgarden");
+  const signInLink = vercelLink(await landing.text());
+  assert.equal(signInLink.searchParams.get("returnTo"), "/?tab=garden");
+  const start = await gate(signInLink);
   const external = new URL(start.headers.get("location"));
   assert.equal(external.origin + external.pathname, "https://vercel.com/oauth/authorize");
   assert.equal(external.searchParams.get("scope"), "openid");
@@ -115,7 +162,12 @@ test("Vercel OIDC validates PKCE, state, nonce, token signature, audience, expir
   };
   const headers = { cookie: flowCookie };
   assert.equal((await gate(callback + "x", { headers })).status, 403);
-  assert.equal((await gate(callback)).status, 403);
+  const retry = await gate(callback);
+  assert.equal(retry.status, 403);
+  assert.match(retry.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  const retryPage = await retry.text();
+  assert.match(retryPage, /role="alert"/);
+  assert.equal(vercelLink(retryPage).searchParams.get("returnTo"), "/");
   assert.equal(exchanges, 0);
   const finished = await gate(callback, { headers });
   assert.equal(finished.status, 303);
