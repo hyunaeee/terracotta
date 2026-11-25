@@ -22,18 +22,6 @@ function returnPath(url: URL, value = url.searchParams.get("returnTo") ?? "/") {
   return target.pathname + target.search;
 }
 
-const pixelSprout = `<svg viewBox="0 0 96 40" aria-hidden="true" focusable="false" shape-rendering="crispEdges">
-  <rect width="96" height="40" fill="#e7eedb"/>
-  <path fill="#d2dfc5" d="M0 0h96v2H0zM12 0h2v33h-2zM35 0h2v33h-2zM59 0h2v33h-2zM82 0h2v33h-2zM0 12h96v2H0z"/>
-  <path fill="#fff6cf" d="M71 4h4v1h2v4h-2v1h-4V9h-2V5h2z"/>
-  <path fill="#bd9a79" d="M0 32h96v2H0z"/><path fill="#d4bba0" d="M0 34h96v6H0z"/>
-  <path fill="#47705a" d="M47 26V16h-4v-2h-3v-5h5v2h3v3h1v-2h2V9h3V7h5v4h-2v3h-3v2h-4v10z"/>
-  <path fill="#82a46f" d="M40 9h5v2h3v2h-4v-2h-4zm14 0h4v2h-4v2h-3v-2h3z"/>
-  <path fill="#784931" d="M38 21h21v5h-2v5h-2v3H42v-3h-2v-5h-2z"/>
-  <path fill="#bd7054" d="M40 23h17v2H40zm2 4h13v4h-2v1h-9v-1h-2z"/>
-  <path fill="#382e25" d="M45 27h1v2h-1zm6 0h1v2h-1z"/>
-</svg>`;
-
 function vercelLoginPath(target: string) {
   return LOGIN_PATH + "?" + new URLSearchParams({ start: "1", returnTo: target });
 }
@@ -66,22 +54,26 @@ function ownerPage(mode: "vercel" | "password" | "logout", action: string, statu
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; min-height: 100svh; padding: 1rem; display: grid; place-items: center; color: #28352b; background: #f6f3e9; font: 1rem/1.6 system-ui, sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
-  main { width: min(100%, 24rem); background: #fffdf7; border: 1px solid #a9aa93; box-shadow: 4px 4px #dfd9c8; }
-  svg { display: block; width: 100%; height: auto; border-bottom: 1px solid #a9aa93; }
-  .content { padding: clamp(1.25rem, 7vw, 2rem); }
+  body { margin: 0; min-height: 100vh; min-height: 100svh; padding: 1.5rem; display: grid; place-items: center; color: #302f28; background: #fff; font: 1rem/1.6 system-ui, sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
+  main { width: min(100%, 21rem); text-align: center; }
+  .pixel-pot { position: relative; display: block; width: 40px; height: 40px; margin: 0 auto 1.25rem; background: linear-gradient(#537a49, #537a49) center 14px / 4px 10px no-repeat; }
+  .pixel-pot::before, .pixel-pot::after { content: ""; position: absolute; width: 6px; height: 6px; background: #a6ca82; }
+  .pixel-pot::before { left: 4px; top: 6px; box-shadow: 4px 2px #8cb46f, 8px 4px #76a35e, 12px 6px #638e53; }
+  .pixel-pot::after { right: 2px; top: 4px; box-shadow: -4px 2px #8cb46f, -8px 4px #76a35e, -12px 8px #638e53; }
+  .pixel-pot i { position: absolute; left: 8px; top: 22px; width: 24px; height: 6px; background: #b98e69; border-bottom: 2px solid #805a43; }
+  .pixel-pot i::after { content: ""; position: absolute; left: 2px; top: 6px; width: 20px; height: 8px; background: #aa7959; box-shadow: 0 3px 0 -1px #805a43; }
   h1 { margin: 0; font-size: clamp(1.5rem, 6vw, 2rem); line-height: 1.25; letter-spacing: -.04em; }
-  p { margin: .65rem 0 1.35rem; color: #52604f; }
-  form { display: grid; gap: .5rem; }
+  p { margin: .75rem 0 1.5rem; color: #575e53; }
+  form { display: grid; gap: .5rem; text-align: start; }
   label { font-weight: 600; }
-  input, .action { width: 100%; min-height: 2.85rem; padding: .6rem .8rem; border-radius: 3px; font: inherit; }
+  input, .action { width: 100%; min-height: 2.85rem; padding: .6rem .8rem; border-radius: 8px; font: inherit; }
   input { border: 1px solid #77836f; color: inherit; background: #fff; }
-  .action { display: grid; place-items: center; border: 1px solid #314d36; background: #395a40; color: #fff; font-weight: 650; text-align: center; text-decoration: none; cursor: pointer; }
+  .action { display: grid; place-items: center; border: 1px solid #bccfa8; background: #daedc8; color: #31432e; font-weight: 650; text-align: center; text-decoration: none; cursor: pointer; }
   form .action { margin-top: .3rem; }
-  .action:hover { background: #2d4934; }
-  :focus-visible { outline: 3px solid #234da0; outline-offset: 3px; }
+  .action:hover { background: #cbe2b6; }
+  :focus-visible { outline: 3px solid #416544; outline-offset: 3px; }
   [role=alert] { margin: 0 0 .75rem; color: #923d28; }
-</style></head><body><main>${pixelSprout}<div class="content"><h1>${title}</h1><p>${descriptions[mode]}</p>${control}</div></main></body></html>`;
+</style></head><body><main><span class="pixel-pot" aria-hidden="true"><i></i></span><h1>${title}</h1><p>${descriptions[mode]}</p>${control}</main></body></html>`;
   return new Response(html, { status, headers: {
     ...privateHeaders, "Content-Type": "text/html; charset=utf-8",
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",

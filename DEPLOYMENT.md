@@ -16,7 +16,7 @@ Vercel의 **Settings → Environments → Production → Branch Tracking**에서
 
 개인 팀의 **Settings → Apps**에서 Sign in with Vercel 앱을 등록합니다. 인증 방식은 `none`, 범위는 `openid`로 설정하고 운영 주소 뒤에 `/owner/callback`을 붙여 콜백 URL로 등록합니다. [Vercel 앱 설정 안내](https://vercel.com/docs/sign-in-with-vercel/manage-from-dashboard)
 
-운영 주소의 픽셀 온실 화면에서 **Vercel로 로그인**을 누릅니다. 로그인한 사용자의 고유 ID가 설정값과 일치하면 개인 작업실이 열립니다. 브라우저 세션은 서명된 ID 토큰의 만료 시점까지, 최대 한 시간 동안 유지됩니다. `/owner/logout`에서 로그아웃할 수 있습니다.
+운영 주소에서 **Vercel로 로그인**을 누릅니다. 로그인한 사용자의 고유 ID가 설정값과 일치하면 처음 요청한 작업실 페이지로 돌아갑니다. 브라우저 세션은 서명된 ID 토큰의 만료 시점까지, 최대 한 시간 동안 유지됩니다. `/owner/logout`에서 로그아웃할 수 있습니다.
 
 ## Docker 배포
 

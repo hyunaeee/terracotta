@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+
 import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { ArenaCategory, ModelInsight } from "@/lib/model-intelligence";
 import { WorkspaceDialog } from "./workspace-dialog";
@@ -289,7 +291,7 @@ function McpBrandMark({ id, name }: { id: string; name: string }) {
   const asset = mcpBrandAssets[brandId];
   return (
     <span className={`mcp-service-mark ${asset ? "has-brand-logo" : "is-fallback"}`} aria-hidden="true">
-      {asset ? <img src={asset} alt="" draggable={false} /> : name.slice(0, 1).toUpperCase()}
+      {asset ? <Image src={asset} width={32} height={32} unoptimized alt="" draggable={false} /> : name.slice(0, 1).toUpperCase()}
     </span>
   );
 }
@@ -1221,6 +1223,30 @@ export default function Home() {
     return loadWorkContext({ create: true, projectId: targetProjectId });
   }
 
+  const workContextBar = (
+    <div className="context-bridge" aria-label="모델 공용 작업 기억">
+      <div className="context-bridge-copy">
+        <i />
+        <span><b aria-live="polite">{contextLoading ? "대화를 여는 중…" : activeProject ? `${activeProject.name} / ${sessionTitle}` : sessionTitle}</b><small>{pendingTeamHandoff
+          ? `${pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요`
+          : teamMembers.length > 1
+            ? `팀 작업 · ${teamMembers.length}명 · ${sessionRole === "viewer" ? "보기 전용" : "편집 가능"}`
+            : lastContextProvider
+              ? `${lastContextProvider === "openai" ? "GPT" : lastContextProvider === "anthropic" ? "Claude" : lastContextProvider === "google" ? "Gemini" : "Perplexity"}에서 이어갈 준비됨`
+              : modelHandoffs.length
+                ? `모델 컨텍스트 인계 ${modelHandoffs.length}회 · 같은 프로젝트 기억 사용`
+                : "GPT, Claude, Gemini가 같은 작업 기록을 사용해요"}</small></span>
+      </div>
+      <div className="context-bridge-actions">
+        <button type="button" disabled={!canEditSession} className={modelPreference === "gpt" ? "active" : ""} onClick={() => setModelPreference("gpt")}>GPT로 이어하기</button>
+        <button type="button" disabled={!canEditSession} className={modelPreference === "claude" ? "active" : ""} onClick={() => setModelPreference("claude")}>Claude로 이어하기</button>
+        <button type="button" disabled={!canEditSession} className={modelPreference === "gemini" ? "active" : ""} onClick={() => setModelPreference("gemini")}>Gemini로 이어하기</button>
+        <button type="button" className={pendingTeamHandoff ? "attention" : ""} onClick={() => setTeamOpen(true)}>팀 공유{teamMembers.length > 1 ? ` ${teamMembers.length}` : ""}</button>
+        <button type="button" onClick={() => void newChat()}>새 작업</button>
+      </div>
+    </div>
+  );
+
   return (
     <main className="app-frame">
       <aside id="workspace-navigation" aria-label="작업실 메뉴" onKeyDown={handleNavigationKey} className={`sidebar ${mobileMenu ? "open" : ""}`}>
@@ -1278,17 +1304,93 @@ export default function Home() {
           <button className="mobile-garden" onClick={() => setGardenOpen(true)} aria-label="테라코타 가든 열기"><PixelIcon name="sprout" /></button>
         </header>
 
-        <div className={`conversation ${messages.length ? "has-messages" : ""}`}>
-          {messages.length === 0 ? (
-            <div className="empty-state">
-              <div className="greenhouse-welcome">
-                <div className="welcome-copy">
-                  <h1>무엇을 <span>도와드릴까요?</span></h1>
-                  <p>필요한 모델은 제가 알아서 고를게요.</p>
-                </div>
-                <div className="greenhouse-scene" role="img" aria-label="햇살 아래 화분과 새싹이 자라는 픽셀 온실" />
+        <div className={`chat-body ${messages.length ? "" : "start-screen"}`}>
+          <div className={`conversation ${messages.length ? "has-messages" : ""}`}>
+            {messages.length === 0 ? (
+              <div className="empty-state">
+                <span className="hello-seed" aria-hidden="true" />
+                <h1>무엇을 도와드릴까요?</h1>
+                <p>필요한 모델은 제가 알아서 고를게요.</p>
               </div>
-              <h2 className="prompt-heading">이렇게 시작해 보세요</h2>
+            ) : (
+              <div className="message-list" role="log" aria-label="대화 기록" aria-relevant="additions">
+                {messages.map((message, index) => (
+                  <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
+                    {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
+                    <div>
+                      {message.role === "user" && message.author && message.author !== currentUser && <small className="team-author">{message.author}</small>}
+                      <p>{message.text}</p>
+                      {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={`${step.status} ${step.type}`} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
+                      {message.approval && (
+                        <section className={`tool-approval ${message.approval.status ?? "pending"}`} aria-label="외부 작업 승인">
+                          <div className="tool-approval-head"><b>실행 전 확인</b><span>{message.approval.actions.length}개 작업</span></div>
+                          {message.approval.actions.map((action, actionIndex) => (
+                            <article key={`${action.service}-${action.tool}-${actionIndex}`}>
+                              <div><b>{action.service}</b><small>{action.tool}</small></div>
+                              <code>{JSON.stringify(action.arguments)}</code>
+                            </article>
+                          ))}
+                          <p>승인하면 위 내용 그대로 실행하며, 인자 변경은 허용하지 않아요.</p>
+                          <div className="tool-approval-actions">
+                            <button type="button" className="approve" disabled={!canSubmitTask || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
+                            <button type="button" disabled={!canSubmitTask || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
+                          </div>
+                        </section>
+                      )}
+                      {message.models && <small>{message.models}</small>}
+                      {message.retryPrompt && <button className="retry-prompt" type="button" onClick={() => fillComposer(message.retryPrompt!)}>질문 다시 편집</button>}
+                    </div>
+                  </article>
+                ))}
+                {isWorking && (
+                  <article className="message assistant thinking">
+                    <span className="assistant-seed"><TerracottaMark size="tiny" /></span>
+                    <div><p><i /><i /><i /></p><small>{selectedTeam}가 작업 중</small></div>
+                  </article>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="composer-wrap">
+            {failedContext && (
+              <div className="context-feedback" role="alert">
+                <span>{failedContext.create ? "새 대화를 만들지 못했어요." : "대화 기록을 불러오지 못했어요."}</span>
+                <button type="button" onClick={() => void loadWorkContext(failedContext)}>다시 시도</button>
+              </div>
+            )}
+            {messages.length > 0 && workContextBar}
+            <form className="composer" onSubmit={submitTask}>
+              <textarea
+                ref={composerRef}
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={handleComposerKey}
+                placeholder={canEditSession ? "테라코타에게 무엇이든 물어보세요" : "보기 전용 작업입니다"}
+                aria-label="테라코타에게 보낼 메시지"
+                disabled={!canEditSession}
+                rows={1}
+              />
+              <div className="composer-actions">
+                <div>
+                  <button type="button" aria-label="프로젝트 파일" onClick={() => openProjectWorkspace(activeProject?.id ?? null, activeProject ? "files" : "overview")}>＋</button>
+                  <button type="button" aria-label="웹 검색 요청 추가" title="웹 검색 요청 추가" onClick={() => fillComposer(prompt.trim() ? `${prompt.trimEnd()}\n웹에서 최신 자료를 찾아 출처와 함께 알려줘.` : "웹에서 최신 자료를 찾아 출처와 함께 알려줘. 주제는 ")}>◎</button>
+                </div>
+                <span>{selectedTeam}</span>
+                <button className="send-button" disabled={!prompt.trim() || !canSubmitTask} aria-label="메시지 보내기">↑</button>
+              </div>
+            </form>
+            <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
+            {messages.length === 0 && (
+              <details className="start-context">
+                <summary>{pendingTeamHandoff ? "팀 인계 확인" : "모델 전환 및 팀 공유"}</summary>
+                {workContextBar}
+              </details>
+            )}
+          </div>
+          {messages.length === 0 && (
+            <section className="prompt-shelf" aria-labelledby="prompt-heading">
+              <h2 id="prompt-heading">추천 질문</h2>
               <div className="quick-prompts">
                 {quickPrompts.map(({ title, prompt: suggestion, icon }) => (
                   <button key={title} onClick={() => fillComposer(suggestion)}>
@@ -1297,96 +1399,8 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-            </div>
-          ) : (
-            <div className="message-list" role="log" aria-label="대화 기록" aria-relevant="additions">
-              {messages.map((message, index) => (
-                <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
-                  {message.role === "assistant" && <span className="assistant-seed"><TerracottaMark size="tiny" /></span>}
-                  <div>
-                    {message.role === "user" && message.author && message.author !== currentUser && <small className="team-author">{message.author}</small>}
-                    <p>{message.text}</p>
-                    {message.trace && message.trace.length > 0 && <div className="orchestration-trace" aria-label="Terracotta 작업 경로">{message.trace.map((step, stepIndex) => <span className={`${step.status} ${step.type}`} key={`${step.type}-${stepIndex}`}><i />{step.label}</span>)}</div>}
-                    {message.approval && (
-                      <section className={`tool-approval ${message.approval.status ?? "pending"}`} aria-label="외부 작업 승인">
-                        <div className="tool-approval-head"><b>실행 전 확인</b><span>{message.approval.actions.length}개 작업</span></div>
-                        {message.approval.actions.map((action, actionIndex) => (
-                          <article key={`${action.service}-${action.tool}-${actionIndex}`}>
-                            <div><b>{action.service}</b><small>{action.tool}</small></div>
-                            <code>{JSON.stringify(action.arguments)}</code>
-                          </article>
-                        ))}
-                        <p>승인하면 위 내용 그대로 실행하며, 인자 변경은 허용하지 않아요.</p>
-                        <div className="tool-approval-actions">
-                          <button type="button" className="approve" disabled={!canSubmitTask || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "approve")}>{message.approval.status === "running" ? "처리 중" : message.approval.status === "approved" ? "승인 완료" : "승인하고 실행"}</button>
-                          <button type="button" disabled={!canSubmitTask || message.approval.status === "approved" || message.approval.status === "rejected"} onClick={() => void resolveToolApproval(message.approval!, "reject")}>{message.approval.status === "rejected" ? "실행 안 함" : "거절"}</button>
-                        </div>
-                      </section>
-                    )}
-                    {message.models && <small>{message.models}</small>}
-                    {message.retryPrompt && <button className="retry-prompt" type="button" onClick={() => fillComposer(message.retryPrompt!)}>질문 다시 편집</button>}
-                  </div>
-                </article>
-              ))}
-              {isWorking && (
-                <article className="message assistant thinking">
-                  <span className="assistant-seed"><TerracottaMark size="tiny" /></span>
-                  <div><p><i /><i /><i /></p><small>{selectedTeam}가 작업 중</small></div>
-                </article>
-              )}
-            </div>
+            </section>
           )}
-        </div>
-
-        <div className="composer-wrap">
-          {failedContext && (
-            <div className="context-feedback" role="alert">
-              <span>{failedContext.create ? "새 대화를 만들지 못했어요." : "대화 기록을 불러오지 못했어요."}</span>
-              <button type="button" onClick={() => void loadWorkContext(failedContext)}>다시 시도</button>
-            </div>
-          )}
-          <div className="context-bridge" aria-label="모델 공용 작업 기억">
-            <div className="context-bridge-copy">
-              <i />
-              <span><b aria-live="polite">{contextLoading ? "대화를 여는 중…" : activeProject ? `${activeProject.name} / ${sessionTitle}` : sessionTitle}</b><small>{pendingTeamHandoff
-                ? `${pendingTeamHandoff.fromEmail}님이 작업을 넘겼어요`
-                : teamMembers.length > 1
-                  ? `팀 작업 · ${teamMembers.length}명 · ${sessionRole === "viewer" ? "보기 전용" : "편집 가능"}`
-                  : lastContextProvider
-                    ? `${lastContextProvider === "openai" ? "GPT" : lastContextProvider === "anthropic" ? "Claude" : lastContextProvider === "google" ? "Gemini" : "Perplexity"}에서 이어갈 준비됨`
-                    : modelHandoffs.length
-                      ? `모델 컨텍스트 인계 ${modelHandoffs.length}회 · 같은 프로젝트 기억 사용`
-                      : "GPT, Claude, Gemini가 같은 작업 기록을 사용해요"}</small></span>
-            </div>
-            <div className="context-bridge-actions">
-              <button type="button" disabled={!canEditSession} className={modelPreference === "gpt" ? "active" : ""} onClick={() => setModelPreference("gpt")}>GPT로 이어하기</button>
-              <button type="button" disabled={!canEditSession} className={modelPreference === "claude" ? "active" : ""} onClick={() => setModelPreference("claude")}>Claude로 이어하기</button>
-              <button type="button" disabled={!canEditSession} className={modelPreference === "gemini" ? "active" : ""} onClick={() => setModelPreference("gemini")}>Gemini로 이어하기</button>
-              <button type="button" className={pendingTeamHandoff ? "attention" : ""} onClick={() => setTeamOpen(true)}>팀 공유{teamMembers.length > 1 ? ` ${teamMembers.length}` : ""}</button>
-              <button type="button" onClick={() => void newChat()}>새 작업</button>
-            </div>
-          </div>
-          <form className="composer" onSubmit={submitTask}>
-            <textarea
-              ref={composerRef}
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={handleComposerKey}
-              placeholder={canEditSession ? "테라코타에게 무엇이든 물어보세요" : "보기 전용 작업입니다"}
-              aria-label="테라코타에게 보낼 메시지"
-              disabled={!canEditSession}
-              rows={1}
-            />
-            <div className="composer-actions">
-              <div>
-                <button type="button" aria-label="프로젝트 파일" onClick={() => openProjectWorkspace(activeProject?.id ?? null, activeProject ? "files" : "overview")}>＋</button>
-                <button type="button" aria-label="웹 검색 요청 추가" title="웹 검색 요청 추가" onClick={() => fillComposer(prompt.trim() ? `${prompt.trimEnd()}\n웹에서 최신 자료를 찾아 출처와 함께 알려줘.` : "웹에서 최신 자료를 찾아 출처와 함께 알려줘. 주제는 ")}>◎</button>
-              </div>
-              <span>{selectedTeam}</span>
-              <button className="send-button" disabled={!prompt.trim() || !canSubmitTask} aria-label="메시지 보내기">↑</button>
-            </div>
-          </form>
-          <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
         </div>
       </section>
 
@@ -1404,9 +1418,9 @@ export default function Home() {
           </div>
           {decorations.map((placement) => {
               const item = gardenShop.find((entry) => entry.id === placement.itemId);
-              return item ? <img key={placement.instanceId} className={`mini-free-item size-${item.size}`} style={gardenPositionStyle(placement)} src={item.asset} alt="" draggable={false} /> : null;
+              return item ? <Image width={192} height={192} unoptimized key={placement.instanceId} className={`mini-free-item size-${item.size}`} style={gardenPositionStyle(placement)} src={item.asset} alt="" draggable={false} /> : null;
           })}
-          <img className="mini-character" style={gardenPositionStyle(characterPosition)} src={treeAssets[treeStage]} alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
+          <Image width={256} height={256} unoptimized loading="eager" className="mini-character" style={gardenPositionStyle(characterPosition)} src={treeAssets[treeStage]} alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
         </button>
         <div className="garden-rail-foot">
           <span>{fullLawn ? "잔디 한 판 완성" : `잔디 ${groundTiles.length}/20`}</span>
@@ -1504,7 +1518,7 @@ export default function Home() {
                     onKeyDown={(event) => moveGardenItemWithKeyboard(event, "decoration", placement.instanceId)}
                     aria-label={`${item.name} 자유롭게 옮기기`}
                   >
-                    <img src={item.asset} alt="" draggable={false} />
+                    <Image src={item.asset} width={192} height={192} unoptimized alt="" draggable={false} />
                   </button>
                 );
               })}
@@ -1516,7 +1530,7 @@ export default function Home() {
                 onKeyDown={(event) => moveGardenItemWithKeyboard(event, "character", "character")}
                 aria-label={`${selectedTree.name} 테라 캐릭터 자유롭게 옮기기`}
               >
-                <img src={treeAssets[treeStage]} alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
+                <Image src={treeAssets[treeStage]} width={256} height={256} unoptimized alt={`${selectedTree.name} ${treeStages[treeStage]} 단계`} draggable={false} />
               </button>
               <span className="free-drag-badge">자유 배치 · 1% 단위 저장</span>
             </div>
@@ -1554,7 +1568,7 @@ export default function Home() {
                 const count = decorations.filter((placement) => placement.itemId === item.id).length;
                 return (
                   <button key={item.id} className={locked || lawnLocked ? "locked" : ""} disabled={locked || lawnLocked || sparks < item.cost} onClick={() => buyItem(item)}>
-                    <span className="shop-item-preview"><img src={item.asset} alt="" draggable={false} /></span><b>{item.name}</b><small>{locked ? `사용량 ${item.unlockAt}에 해금` : lawnLocked ? "잔디 한 판 완성 후 해금" : `${item.cost} S${count ? ` · 보유 ${count}` : ""}`}</small>
+                    <span className="shop-item-preview"><Image src={item.asset} width={192} height={192} unoptimized alt="" draggable={false} /></span><b>{item.name}</b><small>{locked ? `사용량 ${item.unlockAt}에 해금` : lawnLocked ? "잔디 한 판 완성 후 해금" : `${item.cost} S${count ? ` · 보유 ${count}` : ""}`}</small>
                   </button>
                 );
               })}
@@ -1572,7 +1586,7 @@ export default function Home() {
                   <article key={item.id} className={selected ? "selected" : ""}>
                     <div className="tree-card-title"><div><b>{item.name}</b><small>{item.description}</small></div><span>{selected ? "사용 중" : owned ? "보유" : `${item.cost.toLocaleString()} S`}</span></div>
                     <div className="tree-stage-preview">
-                      {item.assets.map((asset, index) => <span key={asset} className={treeStage === index ? "current" : ""}><img src={asset} alt={`${item.name} ${treeStages[index]}`} draggable={false} /><small>{treeStages[index]}</small></span>)}
+                      {item.assets.map((asset, index) => <span key={asset} className={treeStage === index ? "current" : ""}><Image src={asset} width={256} height={256} unoptimized alt={`${item.name} ${treeStages[index]}`} draggable={false} /><small>{treeStages[index]}</small></span>)}
                     </div>
                     <button type="button" disabled={selected || (!owned && sparks < item.cost)} onClick={() => chooseTree(item)}>{selected ? "현재 나무" : owned ? "이 나무로 변경" : "구매하고 변경"}</button>
                   </article>

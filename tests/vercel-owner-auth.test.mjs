@@ -58,7 +58,7 @@ test("password sign-in, validation feedback and logout share an accessible pixel
   assert.match(markup, /<form method="post" action="\/owner\/login\?returnTo=%2Fprojects">/);
   assert.match(markup, /<label for="password">비밀번호<\/label>/);
   assert.match(markup, /autocomplete="current-password"/);
-  assert.match(markup, /shape-rendering="crispEdges"/);
+  assert.match(markup, /class="pixel-pot" aria-hidden="true"/);
   const invalidPassword = await login("incorrect", "/projects");
   assert.equal(invalidPassword.status, 401);
   const feedback = await invalidPassword.text();
@@ -89,8 +89,8 @@ test("the Vercel owner landing is private, self-contained and starts sign-in onl
   assert.match(page.headers.get("content-security-policy"), /default-src 'none'/);
   const html = await page.text();
   assert.match(html, /<html lang="ko">/);
-  assert.match(html, /shape-rendering="crispEdges"/);
-  assert.doesNotMatch(html, /<script|<img|type="password"/);
+  assert.match(html, /class="pixel-pot" aria-hidden="true"/);
+  assert.doesNotMatch(html, /<script|<img|<svg|type="password"/);
   assert.equal(vercelLink(html).searchParams.get("returnTo"), "/");
 });
 

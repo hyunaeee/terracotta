@@ -21,7 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: "TERRACOTTA — 지식이 자라는 AI",
       description: "무엇이든 물어보세요. 지식은 조용히 자랍니다.",
-      images: [{ url: new URL("/og-terracotta.png", base).toString(), width: 1200, height: 630, alt: "테라코타 정원의 픽셀 온실" }],
+      images: [{ url: new URL("/og-terracotta.png", base).toString(), width: 1280, height: 720, alt: "흰 배경에 픽셀 새싹이 있는 테라코타 대화 작업실" }],
     },
     twitter: {
       card: "summary_large_image",
