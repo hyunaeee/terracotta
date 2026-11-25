@@ -1,11 +1,12 @@
-import { env as cloudflareEnv } from "cloudflare:workers";
+import { env as runtimeBindings } from "#terracotta-runtime";
+import type { Database } from "./database";
 
 export type ProviderId = "openai" | "anthropic" | "google" | "perplexity" | "higgsfield";
 export type ModelPreference = "latest" | "gpt" | "claude" | "gemini";
 export type TaskKind = "general" | "research" | "creative";
 
 export type RuntimeEnv = {
-  DB: D1Database;
+  DB: Database;
   OPENAI_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
   GEMINI_API_KEY?: string;
@@ -56,7 +57,7 @@ const seeds = [
 ];
 
 export function runtimeEnv() {
-  return cloudflareEnv as unknown as RuntimeEnv;
+  return runtimeBindings as RuntimeEnv;
 }
 
 function safeError(error: unknown) {
@@ -104,7 +105,7 @@ function isGeminiFrontier(id: string, methods: string[] = []) {
     && (!methods.length || methods.includes("generateContent"));
 }
 
-async function ensureDatabase(db: D1Database) {
+async function ensureDatabase(db: Database) {
   await db.batch(schemaStatements.map((statement) => db.prepare(statement)));
   await db.prepare("INSERT OR IGNORE INTO owner_settings (owner_id, model_preference) VALUES ('owner', 'latest')").run();
   for (const seed of seeds) {
@@ -117,19 +118,19 @@ async function ensureDatabase(db: D1Database) {
   await db.prepare("UPDATE provider_sync SET current_model='claude-fable-5', next_sync_at=NULL WHERE provider='anthropic' AND current_model='claude-sonnet-5' AND status='needs_key'").run();
 }
 
-async function setSyncState(db: D1Database, provider: ProviderId, status: string, currentModel: string | null, error: string | null) {
+async function setSyncState(db: Database, provider: ProviderId, status: string, currentModel: string | null, error: string | null) {
   const now = new Date();
   const next = new Date(now.getTime() + SIX_HOURS_MS);
   await db.prepare(`INSERT INTO provider_sync (provider, status, current_model, last_synced_at, next_sync_at, error) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider) DO UPDATE SET status=excluded.status, current_model=excluded.current_model, last_synced_at=excluded.last_synced_at, next_sync_at=excluded.next_sync_at, error=excluded.error`)
     .bind(provider, status, currentModel, now.toISOString(), next.toISOString(), error).run();
 }
 
-async function upsertLiveModel(db: D1Database, model: Omit<RegistryRow, "is_routable" | "source">) {
+async function upsertLiveModel(db: Database, model: Omit<RegistryRow, "is_routable" | "source">) {
   await db.prepare(`INSERT INTO model_registry (key, provider, model_id, display_name, remote_created_at, version_rank, is_routable, input_price_micros, output_price_micros, source, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 'live-registry', CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET display_name=excluded.display_name, remote_created_at=excluded.remote_created_at, version_rank=excluded.version_rank, is_routable=1, input_price_micros=excluded.input_price_micros, output_price_micros=excluded.output_price_micros, source='live-registry', last_seen_at=CURRENT_TIMESTAMP`)
     .bind(`${model.provider}:${model.model_id}`, model.provider, model.model_id, model.display_name, model.remote_created_at, model.version_rank, model.input_price_micros, model.output_price_micros).run();
 }
 
-async function syncOpenAi(db: D1Database, key?: string) {
+async function syncOpenAi(db: Database, key?: string) {
   if (!key) return setSyncState(db, "openai", "needs_key", "gpt-5.6-sol", null);
   const response = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`OpenAI model registry returned ${response.status}`);
@@ -145,7 +146,7 @@ async function syncOpenAi(db: D1Database, key?: string) {
   await setSyncState(db, "openai", "connected", current.id, null);
 }
 
-async function syncAnthropic(db: D1Database, key?: string) {
+async function syncAnthropic(db: Database, key?: string) {
   if (!key) return setSyncState(db, "anthropic", "needs_key", "claude-fable-5", null);
   const response = await fetch("https://api.anthropic.com/v1/models?limit=1000", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`Anthropic model registry returned ${response.status}`);
@@ -159,7 +160,7 @@ async function syncAnthropic(db: D1Database, key?: string) {
   await setSyncState(db, "anthropic", "connected", current.id, null);
 }
 
-async function syncGoogle(db: D1Database, key?: string) {
+async function syncGoogle(db: Database, key?: string) {
   if (!key) return setSyncState(db, "google", "needs_key", "gemini-3.6-flash", null);
   const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", {
     headers: { "x-goog-api-key": key },
@@ -216,7 +217,7 @@ export async function syncProviderRegistry(force = false) {
   }
 }
 
-export async function currentModels(db: D1Database) {
+export async function currentModels(db: Database) {
   const result = await db.prepare(`SELECT m.provider, m.model_id, m.display_name, m.remote_created_at, m.version_rank, m.is_routable, m.input_price_micros, m.output_price_micros, m.source FROM model_registry m JOIN provider_sync s ON s.provider=m.provider AND s.current_model=m.model_id WHERE m.is_routable=1`).all<RegistryRow>();
   return result.results;
 }
@@ -325,7 +326,7 @@ export async function invokePerplexity(key: string, prompt: string): Promise<Inv
   return { provider: "perplexity", model: "sonar-pro", text: payload.choices?.[0]?.message?.content ?? "", inputUnits: payload.usage?.prompt_tokens ?? 0, outputUnits: payload.usage?.completion_tokens ?? 0, actualCostMicros: typeof payload.usage?.cost?.total_cost === "number" ? Math.round(payload.usage.cost.total_cost * 1_000_000) : undefined, citations: payload.citations };
 }
 
-export async function recordUsage(db: D1Database, invocation: Invocation, task: TaskKind, model: RegistryRow | undefined) {
+export async function recordUsage(db: Database, invocation: Invocation, task: TaskKind, model: RegistryRow | undefined) {
   const estimated = Math.round((invocation.inputUnits * (model?.input_price_micros ?? 0) + invocation.outputUnits * (model?.output_price_micros ?? 0)) / 1_000_000) + (invocation.provider === "perplexity" ? 10_000 : 0);
   const cost = invocation.actualCostMicros ?? estimated;
   await db.prepare("INSERT INTO usage_ledger (id, provider, model_id, task_type, input_units, output_units, provider_cost_micros, currency, is_live) VALUES (?, ?, ?, ?, ?, ?, ?, 'USD', 1)")

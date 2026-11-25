@@ -1,4 +1,5 @@
 import { ownerId } from "./mcp-hub";
+import type { OrchestratorTool } from "./terracotta-orchestrator";
 import { runtimeEnv } from "./terracotta-router";
 import { recordProjectActivity, requireWorkspaceProject, type WorkspaceProject } from "./workspace-projects";
 
@@ -230,7 +231,7 @@ function projectTools(agent: AgentRow, project: WorkspaceProject) {
     connectionName: `${project.name} · ${agent.name}`,
     projectId: project.id,
   };
-  const tools = [
+  const tools: OrchestratorTool[] = [
     {
       ...base,
       alias: `project_list_${project.id.replace(/-/g, "").slice(0, 16)}`,

@@ -1,3 +1,4 @@
+import type { Database } from "./database";
 import { callMcpTool, listMcpConnections, ownerId } from "./mcp-hub";
 import { connectedLocalAgentTools, runLocalAgentTool } from "./local-agent";
 import {
@@ -39,7 +40,7 @@ type RawMcpTool = {
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean };
 };
 
-type OrchestratorTool = {
+export type OrchestratorTool = {
   alias: string;
   kind: "mcp" | "perplexity" | "local_shell";
   connectionId: string | null;
@@ -176,7 +177,7 @@ function toolRisk(tool: RawMcpTool): ToolRisk {
   return reads.test(text) ? "read" : "write";
 }
 
-async function ensureOrchestration(db: D1Database) {
+async function ensureOrchestration(db: Database) {
   await db.batch(orchestrationSchema.map((statement) => db.prepare(statement)));
   await db.prepare("UPDATE orchestration_runs SET status='expired', updated_at=CURRENT_TIMESTAMP WHERE status='approval_required' AND expires_at < ?").bind(new Date().toISOString()).run();
 }

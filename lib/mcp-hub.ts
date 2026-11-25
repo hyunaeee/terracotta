@@ -1,6 +1,7 @@
-import { env as cloudflareEnv } from "cloudflare:workers";
+import { env as runtimeBindings, isPersonalDeployment } from "#terracotta-runtime";
+import type { Database } from "./database";
 
-type McpEnv = { DB: D1Database; MCP_TOKEN_ENCRYPTION_KEY?: string; TERRACOTTA_SELF_HOSTED?: string; TERRACOTTA_TRUST_AUTH_HEADERS?: string };
+type McpEnv = { DB: Database; MCP_TOKEN_ENCRYPTION_KEY?: string; TERRACOTTA_SELF_HOSTED?: string; TERRACOTTA_TRUST_AUTH_HEADERS?: string };
 type Connection = {
   id: string; owner_id: string; name: string; server_url: string; category: string; status: string; auth_type: string;
   tool_count: number; tools_json: string; encrypted_access_token: string | null; encrypted_refresh_token: string | null;
@@ -53,8 +54,9 @@ const schema = [
   `CREATE TABLE IF NOT EXISTS mcp_oauth_states (state TEXT PRIMARY KEY NOT NULL, connection_id TEXT NOT NULL, owner_id TEXT NOT NULL, encrypted_verifier TEXT NOT NULL, redirect_uri TEXT NOT NULL, resource TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL, expires_at TEXT NOT NULL)`,
 ];
 
-function env() { return cloudflareEnv as unknown as McpEnv; }
+function env() { return runtimeBindings as McpEnv; }
 export function ownerId(request: Request) {
+  if (isPersonalDeployment) return "owner";
   const environment = env();
   if (environment.TERRACOTTA_SELF_HOSTED === "true" && environment.TERRACOTTA_TRUST_AUTH_HEADERS !== "true") return "owner";
   return request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() || "owner";
@@ -69,7 +71,7 @@ function assertSafeUrl(value: string) {
   return url;
 }
 
-async function ensureHub(db: D1Database, owner: string) {
+async function ensureHub(db: Database, owner: string) {
   await db.batch(schema.map((sql) => db.prepare(sql)));
   for (const item of presets) {
     await db.prepare("INSERT OR IGNORE INTO mcp_connections (id, owner_id, name, server_url, category, auth_type) VALUES (?, ?, ?, ?, ?, ?)").bind(item.id, owner, item.name, item.url, item.category, item.auth).run();
@@ -152,7 +154,7 @@ function authMetadataCandidates(issuerValue: string) {
 }
 async function firstJson(urls: string[]) { let last: unknown; for (const url of urls) { try { return await readJson(url); } catch (error) { last = error; } } throw last ?? new Error("OAuth 메타데이터를 찾지 못했어요."); }
 
-async function connection(db: D1Database, owner: string, id: string) {
+async function connection(db: Database, owner: string, id: string) {
   const row = await db.prepare("SELECT * FROM mcp_connections WHERE owner_id=? AND id=?").bind(owner, id).first<Connection>();
   if (!row) throw new Error("MCP 연결을 찾을 수 없어요.");
   return row;
@@ -160,7 +162,7 @@ async function connection(db: D1Database, owner: string, id: string) {
 
 export async function listMcpConnections(request: Request) {
   const db = env().DB; const owner = ownerId(request); await ensureHub(db, owner);
-  const rows = await db.prepare("SELECT id, name, server_url, category, status, auth_type, tool_count, tools_json, CASE WHEN oauth_client_id IS NULL THEN 0 ELSE 1 END AS has_credentials, last_checked_at, error FROM mcp_connections WHERE owner_id=?").bind(owner).all<Record<string, unknown>>();
+  const rows = await db.prepare("SELECT id, name, server_url, category, status, auth_type, tool_count, tools_json, CASE WHEN oauth_client_id IS NULL THEN 0 ELSE 1 END AS has_credentials, last_checked_at, error FROM mcp_connections WHERE owner_id=?").bind(owner).all<Pick<Connection, "id" | "name" | "server_url" | "category" | "status" | "auth_type" | "tool_count" | "tools_json" | "last_checked_at" | "error"> & { has_credentials: number }>();
   const order = new Map(presets.map((item, index) => [item.id, index]));
   return rows.results.map((row) => {
     const preset = presets.find((item) => item.id === row.id);
@@ -248,7 +250,7 @@ export async function finishMcpOAuth(request: Request) {
   return { connectionId: state.connection_id };
 }
 
-async function activeAccessToken(db: D1Database, item: Connection) {
+async function activeAccessToken(db: Database, item: Connection) {
   const current = await decrypt(item.encrypted_access_token);
   if (!item.token_expires_at || new Date(item.token_expires_at).getTime() > Date.now() + 60_000) return current;
   const refreshToken = await decrypt(item.encrypted_refresh_token);

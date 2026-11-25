@@ -1,6 +1,21 @@
 # Terracotta 운영 배포
 
-이 배포판은 `chatgpt.site`와 분리된 독립 웹 서비스입니다. Docker가 앱과 영구 D1 데이터를 실행하고, Caddy가 도메인의 HTTPS 인증서를 자동으로 관리하며, GitHub 로그인이 팀원 이메일을 Terracotta 권한 시스템에 전달합니다.
+## 개인 Vercel 배포
+
+Vercel에서는 `npm run build:vercel`로 Next.js를 빌드합니다. Production 환경에 Turso 데이터베이스를 연결하면 대화와 프로젝트가 새 배포에도 유지됩니다. 가든은 같은 주소로 접속한 브라우저의 로컬 저장소에 보관됩니다.
+
+| Production 환경 변수 | 용도 |
+| --- | --- |
+| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Vercel에서 Turso 데이터베이스를 연결하면 제공됩니다. |
+| `TERRACOTTA_OWNER_PASSWORD` | `/owner/login`에서 사용하는 개인 비밀번호입니다. 무작위 32바이트를 base64url로 인코딩해 설정합니다. |
+| `MCP_TOKEN_ENCRYPTION_KEY` | MCP 연결 정보를 보호하는 키입니다. 무작위 32바이트를 base64로 인코딩해 설정하고 배포 간에 같은 값을 유지합니다. |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `PERPLEXITY_API_KEY` | 실제 AI 대화에 사용할 공급사의 키를 설정합니다. |
+
+Vercel의 **Settings → Environments → Production → Branch Tracking**에서 운영 브랜치를 확인할 수 있습니다. 연결된 GitHub 저장소의 해당 브랜치에 푸시하면 빌드가 성공한 후 같은 운영 주소에 반영됩니다. 환경 변수만 바꾼 경우에는 Production을 다시 배포하세요. 로그인 후 `/api/health`에서 데이터베이스 연결을 확인할 수 있습니다.
+
+## Docker 배포
+
+Docker가 앱과 영구 D1 데이터를 실행하고, Caddy가 도메인의 HTTPS 인증서를 자동으로 관리하며, GitHub 로그인이 팀원 이메일을 Terracotta 권한 시스템에 전달합니다.
 
 ## 준비물
 
