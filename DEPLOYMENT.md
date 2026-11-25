@@ -7,11 +7,16 @@ Vercel에서는 `npm run build:vercel`로 Next.js를 빌드합니다. Production
 | Production 환경 변수 | 용도 |
 | --- | --- |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Vercel에서 Turso 데이터베이스를 연결하면 제공됩니다. |
-| `TERRACOTTA_OWNER_PASSWORD` | `/owner/login`에서 사용하는 개인 비밀번호입니다. 무작위 32바이트를 base64url로 인코딩해 설정합니다. |
+| `TERRACOTTA_VERCEL_CLIENT_ID`, `TERRACOTTA_VERCEL_OWNER_ID` | Sign in with Vercel 앱의 Client ID와 작업실에 접근할 Vercel 사용자의 고유 ID입니다. |
+| `TERRACOTTA_OWNER_PASSWORD` | Vercel 로그인 설정을 생략하고 비밀번호 방식으로 직접 운영할 때 설정합니다. 무작위 32바이트를 base64url로 인코딩합니다. |
 | `MCP_TOKEN_ENCRYPTION_KEY` | MCP 연결 정보를 보호하는 키입니다. 무작위 32바이트를 base64로 인코딩해 설정하고 배포 간에 같은 값을 유지합니다. |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `PERPLEXITY_API_KEY` | 실제 AI 대화에 사용할 공급사의 키를 설정합니다. |
 
 Vercel의 **Settings → Environments → Production → Branch Tracking**에서 운영 브랜치를 확인할 수 있습니다. 연결된 GitHub 저장소의 해당 브랜치에 푸시하면 빌드가 성공한 후 같은 운영 주소에 반영됩니다. 환경 변수만 바꾼 경우에는 Production을 다시 배포하세요. 로그인 후 `/api/health`에서 데이터베이스 연결을 확인할 수 있습니다.
+
+개인 팀의 **Settings → Apps**에서 Sign in with Vercel 앱을 등록합니다. 인증 방식은 `none`, 범위는 `openid`로 설정하고 운영 주소 뒤에 `/owner/callback`을 붙여 콜백 URL로 등록합니다. [Vercel 앱 설정 안내](https://vercel.com/docs/sign-in-with-vercel/manage-from-dashboard)
+
+운영 주소를 열면 Vercel 로그인으로 이동합니다. 로그인한 사용자의 고유 ID가 설정값과 일치하면 개인 작업실이 열립니다. 브라우저 세션은 서명된 ID 토큰의 만료 시점까지, 최대 한 시간 동안 유지됩니다. `/owner/logout`에서 로그아웃할 수 있습니다.
 
 ## Docker 배포
 

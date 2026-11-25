@@ -1,3 +1,5 @@
+import { callbackPath, clearFlowCookie, finishVercelSignIn, startVercelSignIn, verifyVercelOwner, type VercelSignIn } from "./vercel-owner-oidc.ts";
+
 const SESSION_COOKIE = "__Host-terracotta_owner";
 const SESSION_SECONDS = 14 * 24 * 60 * 60;
 const LOGIN_PATH = "/owner/login";
@@ -13,11 +15,10 @@ function errorResponse(status: number, error: string) {
   return Response.json({ error }, { status, headers: privateHeaders });
 }
 
-function returnPath(url: URL) {
-  const value = url.searchParams.get("returnTo") ?? "/";
+function returnPath(url: URL, value = url.searchParams.get("returnTo") ?? "/") {
   if (!value.startsWith("/") || value.startsWith("//") || /[\\\x00-\x1f]/.test(value)) return "/";
   const target = new URL(value, url.origin);
-  if (target.origin !== url.origin || target.pathname.startsWith("//") || [LOGIN_PATH, LOGOUT_PATH].includes(target.pathname)) return "/";
+  if (target.origin !== url.origin || target.pathname.startsWith("//") || [LOGIN_PATH, LOGOUT_PATH, callbackPath].includes(target.pathname)) return "/";
   return target.pathname + target.search;
 }
 
@@ -61,9 +62,12 @@ async function newSession(password: string, origin: string) {
   return sessionCookie(`${token}.${hex}`, SESSION_SECONDS);
 }
 
-async function validSession(request: Request, password: string, origin: string) {
+function readSession(request: Request) {
   const cookie = request.headers.get("cookie")?.split(";").map(part => part.trim()).find(part => part.startsWith(SESSION_COOKIE + "="));
-  const value = cookie?.slice(SESSION_COOKIE.length + 1);
+  return cookie?.slice(SESSION_COOKIE.length + 1) ?? "";
+}
+
+async function validSession(value: string, password: string, origin: string) {
   const parts = value?.match(/^(v1\.(\d{10,11})\.[0-9a-f-]{36})\.([0-9a-f]{64})$/);
   if (!parts || Number(parts[2]) <= Math.floor(Date.now() / 1000)) return false;
   const signature = Uint8Array.from(parts[3].match(/../g)!, hex => parseInt(hex, 16));
@@ -114,8 +118,10 @@ function publicRequestUrl(request: Request, deploymentHosts: readonly (string | 
 }
 
 /** A null result lets Next handle the request. The worker route also verifies its scoped agent token against the database. */
-export async function authorizePersonalRequest(request: Request, password: string | undefined, deploymentHosts: readonly (string | undefined)[] = []): Promise<Response | null> {
-  if (!password || !/^[\x21-\x7e]{32,256}$/.test(password)) return errorResponse(503, "개인 로그인 비밀번호를 설정해 주세요.");
+export async function authorizePersonalRequest(request: Request, password: string | undefined, deploymentHosts: readonly (string | undefined)[] = [], oidc?: VercelSignIn): Promise<Response | null> {
+  if (oidc ? !oidc.clientId || !oidc.ownerId : !password || !/^[\x21-\x7e]{32,256}$/.test(password)) {
+    return errorResponse(503, "개인 작업실의 로그인 설정을 확인해 주세요.");
+  }
   const url = publicRequestUrl(request, deploymentHosts);
   if (!url) return errorResponse(403, "요청 도메인을 확인할 수 없습니다.");
   const path = url.pathname;
@@ -129,23 +135,50 @@ export async function authorizePersonalRequest(request: Request, password: strin
     return errorResponse(403, "요청 출처를 확인할 수 없습니다.");
   }
   if (!read && request.headers.get("origin") !== url.origin) return errorResponse(403, "요청 출처를 확인할 수 없습니다.");
+  if (oidc && oidc.productionHost && url.host !== oidc.productionHost) {
+    if (!read || path.startsWith("/api/") || path === callbackPath) return errorResponse(403, "개인 운영 주소로 접속해 주세요.");
+    const canonical = new URL("https://" + oidc.productionHost);
+    canonical.pathname = url.pathname;
+    canonical.search = url.search;
+    return redirect(canonical);
+  }
+  if (oidc && path === callbackPath) {
+    if (request.method !== "GET") return errorResponse(405, "지원하지 않는 요청입니다.");
+    let result: Response;
+    try {
+      const session = await finishVercelSignIn(request, url, oidc);
+      result = redirect(new URL(returnPath(url, session.returnTo), url.origin), sessionCookie(session.token, session.maxAge));
+    } catch {
+      result = new Response('<!doctype html><html lang="ko"><meta charset="utf-8"><title>로그인 확인</title><p>개인 작업실 소유자의 Vercel 계정으로 다시 로그인해 주세요.</p><a href="/owner/login">다시 로그인</a></html>', {
+        status: 403, headers: { ...privateHeaders, "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
+    result.headers.append("Set-Cookie", clearFlowCookie);
+    return result;
+  }
   if (path === LOGIN_PATH) {
     const target = returnPath(url);
+    if (oidc) {
+      if (request.method !== "GET") return errorResponse(405, "지원하지 않는 요청입니다.");
+      const flow = await startVercelSignIn(url.origin, oidc.clientId!, target);
+      return redirect(flow.location, flow.cookie);
+    }
     const action = LOGIN_PATH + "?" + new URLSearchParams({ returnTo: target });
     if (read) return loginForm(action);
     if (request.method !== "POST") return errorResponse(405, "지원하지 않는 요청입니다.");
     if (request.headers.get("content-type")?.split(";")[0] !== "application/x-www-form-urlencoded") return errorResponse(415, "로그인 양식을 사용해 주세요.");
     if (Number(request.headers.get("content-length")) > 2048) return errorResponse(413, "로그인 요청이 너무 큽니다.");
     const attempt = new URLSearchParams(await request.text()).get("password") ?? "";
-    if (!await passwordMatches(attempt, password)) return loginForm(action, true);
-    return redirect(new URL(target, url.origin), await newSession(password, url.origin));
+    if (!await passwordMatches(attempt, password!)) return loginForm(action, true);
+    return redirect(new URL(target, url.origin), await newSession(password!, url.origin));
   }
   if (path === LOGOUT_PATH) {
     if (read) return loginForm(LOGOUT_PATH);
     if (request.method !== "POST") return errorResponse(405, "지원하지 않는 요청입니다.");
     return redirect(new URL(LOGIN_PATH, url.origin), sessionCookie("", 0));
   }
-  if (await validSession(request, password, url.origin)) return null;
+  const token = readSession(request);
+  if (token && (oidc ? await verifyVercelOwner(token, oidc).then(() => true, () => false) : await validSession(token, password!, url.origin))) return null;
   if (!read || path === "/api" || path.startsWith("/api/")) return errorResponse(401, "개인 작업실에 로그인해 주세요.");
   const login = new URL(LOGIN_PATH, url.origin);
   login.searchParams.set("returnTo", path + url.search);

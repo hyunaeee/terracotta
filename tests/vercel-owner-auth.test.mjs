@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
+import { base64url, generateKeyPair, SignJWT } from "jose";
 import { authorizePersonalRequest, personalRequestHeaders } from "../lib/vercel-owner-auth.ts";
 
 const origin = "https://workspace.example.com";
@@ -80,4 +81,61 @@ test("metadata and installer are readable, OAuth callback needs a browser sessio
   assert.equal((await check(req("/api/mcp/callback"))).status, 401);
   assert.equal((await check(req("/api/local-agent/worker", { method: "POST" }))).status, 401);
   assert.equal(await check(req("/api/local-agent/worker", { method: "POST", headers: { authorization: "Bearer tca_" + randomBytes(24).toString("base64url") } })), null);
+});
+
+test("Vercel OIDC validates PKCE, state, nonce, token signature, audience, expiry and the pinned owner", async () => {
+  const { privateKey, publicKey } = await generateKeyPair("RS256");
+  const config = { clientId: "client-123", ownerId: "user-123", keys: async () => publicKey };
+  const gate = (path, options, auth = config) => authorizePersonalRequest(req(path, options), undefined, [], auth);
+  const start = await gate("/owner/login?returnTo=%2F%3Ftab%3Dgarden");
+  const external = new URL(start.headers.get("location"));
+  assert.equal(external.origin + external.pathname, "https://vercel.com/oauth/authorize");
+  assert.equal(external.searchParams.get("scope"), "openid");
+  assert.equal(external.searchParams.get("redirect_uri"), origin + "/owner/callback");
+  assert.equal(external.searchParams.get("code_challenge_method"), "S256");
+  const nonce = external.searchParams.get("nonce");
+  const state = external.searchParams.get("state");
+  const flowCookie = start.headers.get("set-cookie").split(";")[0];
+  const callback = "/owner/callback?code=test-code&state=" + state;
+  const makeToken = (overrides = {}) => new SignJWT({ nonce, ...overrides })
+    .setProtectedHeader({ alg: "RS256" }).setIssuer("https://vercel.com").setSubject(overrides.sub ?? config.ownerId)
+    .setAudience(overrides.aud ?? config.clientId).setIssuedAt().setExpirationTime(overrides.exp ?? "5m").sign(privateKey);
+  let token = await makeToken();
+  let exchanges = 0;
+  config.fetchToken = async (endpoint, init) => {
+    exchanges++;
+    assert.equal(endpoint, "https://api.vercel.com/login/oauth/token");
+    assert.equal(init.body.get("code"), "test-code");
+    assert.equal(init.body.get("redirect_uri"), origin + "/owner/callback");
+    assert.equal(init.body.has("client_secret"), false);
+    const verifier = new TextEncoder().encode(init.body.get("code_verifier"));
+    const digest = await crypto.subtle.digest("SHA-256", verifier);
+    assert.equal(base64url.encode(new Uint8Array(digest)), external.searchParams.get("code_challenge"));
+    return Response.json({ id_token: token, access_token: "unused-access", refresh_token: "unused-refresh" });
+  };
+  const headers = { cookie: flowCookie };
+  assert.equal((await gate(callback + "x", { headers })).status, 403);
+  assert.equal((await gate(callback)).status, 403);
+  assert.equal(exchanges, 0);
+  const finished = await gate(callback, { headers });
+  assert.equal(finished.status, 303);
+  assert.equal(finished.headers.get("location"), origin + "/?tab=garden");
+  const issued = finished.headers.getSetCookie();
+  assert.equal(issued.length, 2);
+  assert.ok(issued[1].includes("Max-Age=0"));
+  assert.doesNotMatch(issued.join(" "), /unused-access|unused-refresh/);
+  const session = { cookie: issued[0].split(";")[0] };
+  assert.equal(await gate("/api/projects", { headers: session }), null);
+  assert.equal((await gate("/api/projects", { headers: session }, { ...config, ownerId: "other" })).status, 401);
+  assert.equal((await gate("/api/projects", { headers: session }, { ...config, clientId: "other" })).status, 401);
+  const foreign = await generateKeyPair("RS256");
+  assert.equal((await gate("/api/projects", { headers: session }, { ...config, keys: async () => foreign.publicKey })).status, 401);
+  for (const wrong of [{ sub: "other" }, { nonce: "different" }, { aud: "other" }, { exp: 1 }]) {
+    token = await makeToken(wrong);
+    assert.equal((await gate(callback, { headers })).status, 403);
+  }
+  assert.equal((await gate("/owner/login", undefined, { clientId: "incomplete" })).status, 503);
+  assert.equal((await gate("/api/mcp/callback")).status, 401);
+  assert.equal(await gate("/api/mcp/client-metadata"), null);
+  assert.equal((await gate("/owner/login", undefined, { ...config, productionHost: "live.example" })).headers.get("location"), "https://live.example/owner/login");
 });
