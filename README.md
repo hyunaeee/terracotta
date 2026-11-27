@@ -16,11 +16,15 @@
 
 ## 개인 배포 버전
 
-개인 Vercel 작업실은 `codex/shared-model-context` 브랜치에서 배포합니다. 흰 배경의 중앙 입력창에서 질문을 시작하고, 프로젝트별 기록을 GPT·Claude·Gemini 사이에서 이어갈 수 있습니다. 기존 픽셀 화분과 타일 정원을 유지하며, 버튼과 선택 상태에는 밝은 초록을, 제목과 아이콘에는 갈색을 사용합니다.
+[개인 테라코타](https://terracotta-hyunaeee.vercel.app/)를 열면 흰 바탕의 새싹과 질문 입력창이 먼저 보입니다. ChatGPT 또는 Claude를 골라 평소 쓰는 계정에서 대화를 이어가세요. 개인 보관함은 소유자로 로그인한 뒤 열 수 있습니다.
 
-[운영 버전 README](https://github.com/hyunaeee/terracotta/blob/codex/shared-model-context/README.md) · [실행·로그인·배포 설정](https://github.com/hyunaeee/terracotta/blob/codex/shared-model-context/DEPLOYMENT.md)
+이 PC에서 `npm run dev:subscriptions`로 로컬 작업실을 실행하면 사용 가능한 ChatGPT Plus·Pro 계정의 승인을 받아 테라코타 안에서 답변을 받을 수 있습니다. Claude Desktop을 선택하면 앱의 입력창에 질문을 미리 채워줍니다. 기존 Higgsfield 연결은 해당 서비스의 대화에서 사용할 수 있습니다.
 
-![기존 픽셀 화분과 중앙 입력창이 있는 개인 작업실](https://raw.githubusercontent.com/hyunaeee/terracotta/refs/heads/codex/shared-model-context/docs/screenshots/terracotta-home.png)
+![픽셀 새싹과 구독 선택 입력창이 있는 개인 작업실](https://raw.githubusercontent.com/hyunaeee/terracotta/refs/heads/codex/shared-model-context/docs/screenshots/terracotta-home.png)
+
+![촘촘한 세이지 잔디와 꽃나무, 온실, 고양이를 배치한 가든 예시](https://raw.githubusercontent.com/hyunaeee/terracotta/refs/heads/codex/shared-model-context/docs/screenshots/terracotta-garden.png)
+
+개인 배포에는 `codex/shared-model-context` 브랜치를 사용합니다. [운영 버전 README](https://github.com/hyunaeee/terracotta/blob/codex/shared-model-context/README.md) · [실행·로그인·배포 설정](https://github.com/hyunaeee/terracotta/blob/codex/shared-model-context/DEPLOYMENT.md)
 
 아래는 기본 브랜치의 셀프호스팅 버전 설명입니다.
 
