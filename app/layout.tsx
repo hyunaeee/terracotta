@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
+import { WorkspaceMode } from "./workspace-mode";
+import { isPersonalDeployment } from "#terracotta-runtime";
 import "./globals.css";
 import "./garden-workspace.css";
 
@@ -32,10 +34,14 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const requestHeaders = await headers();
+  const local = /^127\.0\.0\.1(?::\d+)?$/.test(requestHeaders.get("host") ?? "")
+    && requestHeaders.get("x-terracotta-local-subscriptions") === "1";
+  const mode = local ? "local" : requestHeaders.get("x-terracotta-browser-workspace") === "1" ? "browser" : isPersonalDeployment ? "personal-owner" : "owner";
   return (
     <html lang="ko">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body>
+      <body className={`${geistSans.variable} ${geistMono.variable}`}><WorkspaceMode mode={mode}>{children}</WorkspaceMode></body>
     </html>
   );
 }

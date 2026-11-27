@@ -5,7 +5,7 @@
 <h1 align="center">Terracotta</h1>
 
 <p align="center">
-  GPT, Claude, Gemini 사이에서 프로젝트 대화를 이어가고, 마친 작업으로 픽셀 정원을 가꾸는 개인 AI 작업실입니다.
+  평소 쓰는 ChatGPT와 Claude로 대화를 시작하고 작은 픽셀 정원을 가꾸는 개인 AI 작업실입니다.
 </p>
 
 <p align="center">
@@ -22,18 +22,26 @@
 
 ## 처음 사용하는 분께
 
-1. **대화를 시작합니다.** 첫 화면의 대화 입력창에 질문을 적어 보내세요. 프로젝트를 만들면 기본 모델과 작업 지침을 지정할 수 있습니다. 실제 답변을 받으려면 서버에 사용할 공급사의 API 키가 하나 이상 설정되어 있어야 합니다.
-2. **다른 모델로 이어갑니다.** 작업 중 GPT, Claude 또는 Gemini를 선택하면 새 모델이 같은 대화의 기록과 도구 실행 요약을 이어받습니다. 검색에는 Perplexity를 연결할 수 있습니다.
-3. **정원을 가꿉니다.** 답변이 완료되면 Sparks와 성장 단계가 쌓입니다. Sparks로 5×4 정원에 잔디를 심고, 장식을 구입해 원하는 자리에 배치하세요.
+1. 첫 화면에서 **ChatGPT** 또는 **Claude**를 선택하고 질문을 적으세요. **복사하고 열기**를 누르면 질문이 클립보드에 복사되고 공식 사이트가 열립니다. 그곳에서 붙여넣고 전송하면 평소 쓰는 계정으로 답변을 받습니다. 클립보드 접근을 제한한 브라우저에서는 직접 복사할 수 있습니다. [ChatGPT](https://chatgpt.com/) · [Claude](https://claude.ai/new)
+2. **구독 연결 설정**에서 ChatGPT Work 또는 이 PC의 Claude 데스크톱 앱에 질문을 미리 채우도록 선택할 수 있습니다. 초안이 열리면 내용을 확인하고 전송하세요. 긴 질문은 웹에서 붙여넣도록 안내합니다. [ChatGPT Work 초안 예시](https://developers.openai.com/training/walkthroughs/building-a-shareable-site#try-it) · [Claude 데스크톱 링크](https://support.claude.com/en/articles/14729294-open-claude-desktop-with-a-link)
+3. **테라코타 가든**에서 Sparks로 잔디를 심고 꽃이나 벤치를 놓아 보세요. 장식과 화분은 원하는 위치로 끌어 옮길 수 있습니다. 테라코타 안에서 모델 답변이 완료되면 Sparks와 성장 횟수가 쌓입니다. 공식 웹이나 데스크톱 앱에서 이어간 대화는 해당 서비스에서 확인합니다.
 
-개인 운영 주소를 열면 새싹 화분이 있는 로그인 화면이 나옵니다. **Vercel로 로그인**을 누르면 등록된 소유자 계정으로 작업실에 들어갈 수 있습니다. GitHub의 `codex/shared-model-context`가 운영 브랜치이며, 이 브랜치에 푸시해 빌드가 성공하면 같은 주소에 반영됩니다. [배포 및 로그인 설정](./DEPLOYMENT.md)
+ChatGPT 답변을 테라코타 안에서 받으려면 이 PC에서 로컬 작업실을 실행하고 OpenAI에 로그인하세요. 구독을 지원하는 계정에는 사용할 수 있는 모델이 표시되며 플랜의 한도가 적용됩니다. 공식 대화에 이미 연결한 Higgsfield도 그곳에서 사용할 수 있습니다. 개인 작업실에서 직접 생성하려면 Higgsfield MCP에 별도로 로그인해야 하며, 생성 크레딧은 Higgsfield 기준을 따릅니다. [내 PC에서 ChatGPT 연결하기](#내-pc에서-chatgpt-연결하기)
 
-| 데이터 | 개인 Vercel 배포 | Docker 셀프호스팅 |
-| --- | --- | --- |
-| 대화, 프로젝트, 도구 실행 기록, 사용량 원장 | 연결한 Turso 데이터베이스 | `terracotta-data` 볼륨의 로컬 D1 |
-| 잔디, 장식 배치, 나무 성장, Sparks | 접속한 주소의 브라우저 로컬 저장소 | 접속한 주소의 브라우저 로컬 저장소 |
+### 내 데이터가 저장되는 곳
+
+| 데이터 | 저장 위치 |
+| --- | --- |
+| 공식 웹·앱에서 보낸 질문과 답변 | 선택한 서비스의 계정과 대화 기록 설정을 따릅니다. 테라코타에 계정 비밀번호나 외부 대화가 전달되지 않습니다. |
+| 서비스 선택, Claude 앱 설정, 정원 배치와 성장 | 접속한 주소의 브라우저 로컬 저장소에 보관합니다. 질문 초안은 해당 브라우저 탭의 세션 저장소에 둡니다. |
+| 로컬 작업실에서 받은 ChatGPT 답변 | 열린 작업실 화면에 표시합니다. ChatGPT 인증 토큰은 이 PC의 실행 중인 로컬 서버 메모리에 둡니다. |
+| 소유자 전용 프로젝트, 대화, 도구 기록, 사용량 원장 | 개인 Vercel 배포에서는 연결한 Turso에, Docker에서는 `terracotta-data` 볼륨의 로컬 D1에 보관합니다. |
+
+소유자 인증을 구성한 배포에서는 사이드바의 **보관한 개인 프로젝트 열기**를 통해 전용 작업실에 로그인합니다. 공개 구독 화면에서 개인 프로젝트와 기록에 접근하려면 별도의 소유자 인증이 필요합니다. [배포 및 로그인 설정](./DEPLOYMENT.md)
 
 ## 현재 구현된 것
+
+공개 구독 화면과 로컬 ChatGPT 작업실에서는 위의 대화 방식과 픽셀 정원을 이용할 수 있습니다. 아래의 모델 라우터와 프로젝트·MCP 기능은 공급사를 연결한 소유자 작업실 또는 셀프호스팅 환경에서 실행됩니다.
 
 - **멀티 모델 라우터** — OpenAI, Anthropic, Google Gemini, Perplexity, Higgsfield 연결 상태와 사용량 예산을 한곳에서 관리합니다.
 - **GPT · Claude · Gemini 공용 작업 기억** — 대화·최종 결과·도구 기록을 작업 세션에 저장해 모델을 바꿔도 같은 작업을 이어갑니다.
@@ -46,7 +54,7 @@
 - **OpenAI 실행 경로** — 기본 모델은 GPT-6.2 Sol입니다. Responses API에서 작업별 추론 강도와 도구 호출 상한을 설정하고, `store: false`로 요청합니다.
 - **개인화된 모델 우선순위** — 최신 모델, GPT, Claude, Gemini 중 사용자가 직접 기본 순서를 정합니다.
 - **모델 연구소** — 최신 모델의 장단점, 잘하는 작업, LM Arena 카테고리별 순위와 Artificial Analysis 지표를 출처와 함께 비교합니다.
-- **5×4 비트맵 가든** — 흙에서 시작해 잔디를 한 칸씩 심고, 같은 잔디 20칸을 채우면 하나의 이어진 정원이 됩니다.
+- **5×4 픽셀 정원** — 새싹·클로버·민트 잔디를 한 칸씩 심습니다. 같은 종류로 20칸을 채우면 잔디의 경계가 이어집니다. 잔디 위의 작은 격자는 장식 위치를 잡을 때 쓰는 눈금입니다.
 - **자유 배치 가드닝** — 장식과 Terracotta 캐릭터를 타일에 묶이지 않은 좌표로 드래그하고 기기에 저장합니다.
 - **가드닝 스토어** — 꽃, 장식, 친구, 도구, 텃밭과 성장 모습이 다른 나무를 Sparks로 구매합니다.
 - **MCP Hub** — GitHub, Notion, Figma, Linear, Google Drive, Slack 등 다양한 MCP 연결을 검색하고 관리합니다.
@@ -58,9 +66,15 @@
 
 ### 픽셀 아트 디자인 원칙
 
-채팅 첫 화면은 흰 바탕에 작은 화분 마스코트와 대화 입력창을 중심으로 구성합니다. 잎의 연두색과 흙의 갈색을 포인트로 씁니다. 화분과 정원의 식물·장식에는 기존 픽셀 아트를 사용하고, 작은 원본을 확대할 때는 최근접 이웃 보간이나 CSS `image-rendering: pixelated`로 윤곽을 보존합니다. [가든 에셋](./public/assets/garden)
+채팅 첫 화면은 흰 바탕에 작은 화분 마스코트와 대화 입력창을 중심으로 구성합니다. 잎의 연두색과 흙의 갈색을 포인트로 씁니다. 기존 장식 27종은 64×64 격자에 꽃잎과 잎맥, 나뭇결과 돌 모서리를 그려 192×192 PNG로 내보냅니다. 숲나무·벚꽃나무·노란 꽃나무·라벤더 꽃나무는 씨앗부터 큰 나무까지 네 단계로 자랍니다. 화면에서는 `image-rendering: pixelated`로 픽셀 경계를 유지합니다. [가든 에셋](./public/assets/garden) · [에셋 생성 코드](./scripts/generate-garden-assets.mjs)
+
+![새싹 잔디 20칸을 채운 정원에 벚꽃나무, 벤치, 꽃 수레와 연못을 배치한 예시](./docs/screenshots/terracotta-garden.png)
+
+잔디의 작은 정사각형과 명도 차이는 GitHub 기여도 달력을, 꽃·가구의 실루엣은 Kenney의 Tiny Town을 참고했습니다. 정원의 그림은 저장소에 있는 화분과 장식을 바탕으로 다시 그렸습니다. [GitHub 기여도 달력](https://docs.github.com/en/account-and-profile/concepts/contributions-on-your-profile) · [Kenney Tiny Town](https://kenney.nl/assets/tiny-town)
 
 ## 제품 흐름
+
+소유자 작업실에 공급사와 도구를 연결하면 아래 순서로 프로젝트 대화와 실행 결과를 관리합니다.
 
 ```mermaid
 flowchart LR
@@ -117,16 +131,25 @@ Terracotta는 다음 순서로 대화 기록, 모델 호출, 도구 실행을 �
 
 ## 로컬에서 실행하기
 
-운영 중인 코드와 같은 브랜치를 내려받습니다.
+Node.js 24 이상과 npm을 준비하고 저장소를 내려받습니다.
 
 ```bash
 git clone --branch codex/shared-model-context https://github.com/hyunaeee/terracotta.git
 cd terracotta
 ```
 
+### 내 PC에서 ChatGPT 연결하기
+
+```bash
+npm ci
+npm run dev:subscriptions
+```
+
+터미널을 켜 둔 채 아래 주소를 열고 **구독 연결 설정 → ChatGPT**에서 OpenAI에 로그인하세요. 계정에 표시된 모델을 선택하고 질문을 보내면 이 작업실에서 답변을 읽을 수 있습니다. 이 주소는 같은 PC에서만 열립니다. 서버를 종료하면 인증 토큰이 메모리에서 사라져 다음 실행 때 다시 로그인합니다. [이 PC의 구독 작업실 열기](http://127.0.0.1:4387/?subscriptions=1)
+
 ### 수정하면서 개발하기
 
-Node.js 24 이상과 npm이 필요합니다. 프로젝트 루트에서 `.env.example`을 `.env`로 복사한 뒤 사용할 공급사의 키를 입력하세요.
+서버에서 모델 라우터나 MCP를 개발할 때는 프로젝트 루트에서 `.env.example`을 `.env`로 복사하고 사용할 공급사의 키를 입력하세요.
 
 ```bash
 npm ci
@@ -146,6 +169,8 @@ docker compose up -d --build
 기본 접속 주소는 [localhost:3000](http://localhost:3000)입니다. `terracotta-data` 볼륨에는 로컬 D1 데이터와 최초 실행 때 생성한 MCP 토큰 암호화 키가 저장됩니다. [셀프호스팅 및 백업](./SELF_HOSTING.md) · [자체 도메인과 GitHub 팀 로그인](./DEPLOYMENT.md#docker-배포)
 
 ### 서버 환경 변수
+
+아래 값은 서버 측 라우터와 소유자 전용 기능을 구성할 때 사용합니다. 기존 구독으로 공식 웹·앱을 열거나 로컬에서 ChatGPT에 로그인할 때는 모델 API 키가 필요하지 않습니다.
 
 | 변수 | 용도 |
 | --- | --- |
@@ -173,6 +198,8 @@ API 키와 데이터베이스 토큰은 서버 환경 변수에만 저장합니�
 | 명령 | 설명 |
 | --- | --- |
 | `npm run dev` | 로컬 개발 서버 실행 |
+| `npm run dev:subscriptions` | 이 PC에서 구독 작업실 실행 (`127.0.0.1:4387`) |
+| `node scripts/generate-garden-assets.mjs` | 장식, 잔디·흙, 성장 단계별 화분의 PNG 다시 생성 |
 | `npm run build` | vinext Worker 빌드 생성 |
 | `npm run build:vercel` | Vercel용 Next.js 빌드 생성 |
 | `npm test` | 빌드 및 핵심 제품 동작 검증 |
@@ -207,7 +234,7 @@ tests/                   제품 동작 검증
 
 ## 현재 상태
 
-Terracotta는 제품 방향과 핵심 상호작용을 검증하는 초기 프로토타입입니다. 실제 모델 응답, MCP OAuth, 비용 기록에는 각 공급사의 공식 API 또는 계정 인증이 필요합니다. 소비자용 AI 구독과 공급사 API 사용료는 서로 별개일 수 있습니다.
+Terracotta는 개인 AI 작업실과 정원을 개발하는 초기 프로토타입입니다. 구독으로 여는 공식 대화와 로컬 ChatGPT 연결에는 해당 계정의 사용 한도가 적용됩니다. 소유자가 별도로 구성한 서버 라우터의 API 호출은 그 공급사 API 계정에 기록됩니다.
 
 ## License
 

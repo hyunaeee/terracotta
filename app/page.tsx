@@ -5,6 +5,17 @@ import Image from "next/image";
 import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { ArenaCategory, ModelInsight } from "@/lib/model-intelligence";
 import { WorkspaceDialog } from "./workspace-dialog";
+import { useWorkspaceMode } from "./workspace-mode";
+import { ModelConnections, subscriptionServices, type SubscriptionProvider } from "./model-connections";
+import { LocalChatGPTAccount, useLocalChatGPT } from "./local-chatgpt";
+
+function readPreference(key: string) {
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+
+function savePreference(key: string, value: string) {
+  try { window.localStorage.setItem(key, value); } catch { /* Keep the workspace usable when browser storage is full or disabled. */ }
+}
 
 const quickPrompts = [
   { title: "회의 정리", prompt: "오늘 회의 내용을 정리해줘", icon: "notes" },
@@ -297,7 +308,29 @@ function McpBrandMark({ id, name }: { id: string; name: string }) {
 }
 
 export default function Home() {
+  const mode = useWorkspaceMode();
+  const browserWorkspace = mode === "local" || mode === "browser";
+  const [subscription, setSubscription] = useState<SubscriptionProvider>("chatgpt");
+  const [claudeDesktop, setClaudeDesktop] = useState(false);
+  const [chatGPTWork, setChatGPTWork] = useState(false);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [handoffNote, setHandoffNote] = useState("");
+  const service = subscriptionServices[subscription];
+  const localAccount = useLocalChatGPT(mode === "local");
+  const localChat = mode === "local" && subscription === "chatgpt";
+  const localRequest = useRef<AbortController | null>(null);
   const [prompt, setPrompt] = useState("");
+  const claudeQuery = subscription === "claude" && claudeDesktop
+    ? new URLSearchParams({ q: prompt.trim() }).toString().replaceAll("+", "%20") : "";
+  const useClaudeApp = Boolean(claudeQuery) && claudeQuery.length <= 6000;
+  const workQuery = mode === "browser" && subscription === "chatgpt" && chatGPTWork
+    ? new URLSearchParams({ prompt: prompt.trim(), surface: "work" }).toString() : "";
+  const useWorkDraft = Boolean(workQuery) && workQuery.length <= 6000;
+  const subscriptionAction = localChat ? localAccount.connected ? "ChatGPT에 보내기" : "ChatGPT 연결"
+    : useClaudeApp ? "Claude 앱에서 열기 ↗" : useWorkDraft ? "ChatGPT Work 초안 열기 ↗" : `복사하고 ${service.name} 열기 ↗`;
+  const subscriptionHint = localChat ? "이 PC에서 연결한 ChatGPT 구독으로 답변을 받습니다."
+    : useClaudeApp ? "Claude 데스크톱 앱의 입력창에 질문을 채워 넣습니다."
+    : useWorkDraft ? "ChatGPT Work에서 질문을 확인하고 보내세요." : `질문을 복사해 ${service.name} 공식 사이트에서 이어갑니다.`;
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -306,7 +339,7 @@ export default function Home() {
   const [sessionTitle, setSessionTitle] = useState("새 작업");
   const [lastContextProvider, setLastContextProvider] = useState<string | null>(null);
   const [recentSessions, setRecentSessions] = useState<ContextSession[]>([]);
-  const [contextLoading, setContextLoading] = useState(true);
+  const [contextLoading, setContextLoading] = useState(!browserWorkspace);
   const [failedContext, setFailedContext] = useState<ContextTarget | null>(null);
   const latestContextRequest = useRef(0);
   const activeConversation = useRef(0);
@@ -329,7 +362,7 @@ export default function Home() {
   const [treeVariety, setTreeVariety] = useState("default");
   const [ownedTrees, setOwnedTrees] = useState<string[]>(["default"]);
   const [gardenDrag, setGardenDrag] = useState<GardenDrag | null>(null);
-  const [activeGardenItem, setActiveGardenItem] = useState("character");
+  const [activeGardenItem, setActiveGardenItem] = useState("");
   const [shopCategory, setShopCategory] = useState("전체");
   const [gardenOpen, setGardenOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -378,6 +411,7 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [gardenNote, setGardenNote] = useState("정원은 아직 비어 있어요. 스토어에서 첫 잔디를 심어보세요.");
   const gardenCanvasRef = useRef<HTMLDivElement>(null);
+  useEffect(() => () => localRequest.current?.abort(), []);
 
   useEffect(() => {
     if (!mobileMenu) return;
@@ -401,7 +435,7 @@ export default function Home() {
       event.preventDefault();
       dismissNavigation();
     } else if (event.key === "Tab") {
-      const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
+      const buttons = event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), a[href]");
       const first = buttons[0];
       const last = buttons[buttons.length - 1];
       if (event.shiftKey && document.activeElement === first) {
@@ -414,15 +448,22 @@ export default function Home() {
     }
   }
 
-  /* eslint-disable react-hooks/set-state-in-effect -- browser-persisted owner preferences hydrate once after mount */
   useEffect(() => {
-    const savedPreference = window.localStorage.getItem("terracotta-model-preference");
+    if (browserWorkspace) {
+      try {
+        if (localStorage.getItem("terracotta-subscription") === "claude") setSubscription("claude");
+        setClaudeDesktop(localStorage.getItem("terracotta-claude-desktop") === "true");
+        setChatGPTWork(localStorage.getItem("terracotta-chatgpt-work") === "true");
+        setPrompt(sessionStorage.getItem("terracotta-subscription-draft") ?? "");
+      } catch { /* Private browsing may disable storage. */ }
+    }
+    const savedPreference = readPreference("terracotta-model-preference");
     if (savedPreference === "latest" || savedPreference === "gpt" || savedPreference === "claude" || savedPreference === "gemini") {
       setModelPreference(savedPreference);
     }
-    const saved = window.localStorage.getItem("terracotta-garden-v3");
-    const previous = window.localStorage.getItem("terracotta-garden-v2");
-    const legacy = window.localStorage.getItem("terracotta-garden") ?? window.localStorage.getItem("orbit-simple-garden");
+    const saved = readPreference("terracotta-garden-v3");
+    const previous = readPreference("terracotta-garden-v2");
+    const legacy = readPreference("terracotta-garden") ?? readPreference("orbit-simple-garden");
     if (saved) {
       try {
         const data = JSON.parse(saved) as {
@@ -469,7 +510,7 @@ export default function Home() {
     }
     const params = new URLSearchParams(window.location.search);
     const mcpResult = params.get("mcp");
-    if (mcpResult) {
+    if (mcpResult && !browserWorkspace) {
       setMcpOpen(true);
       setMcpNote(mcpResult === "connected" ? "연결을 마쳤어요. 사용할 수 있는 도구를 동기화했습니다." : params.get("message") || "MCP 인증을 완료하지 못했어요.");
       void loadMcp();
@@ -479,12 +520,21 @@ export default function Home() {
       window.history.replaceState({}, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
     }
     setReady(true);
-  }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  }, [browserWorkspace]);
+
+  useEffect(() => {
+    if (!browserWorkspace || !ready) return;
+    try {
+      localStorage.setItem("terracotta-subscription", subscription);
+      localStorage.setItem("terracotta-claude-desktop", String(claudeDesktop));
+      localStorage.setItem("terracotta-chatgpt-work", String(chatGPTWork));
+      sessionStorage.setItem("terracotta-subscription-draft", prompt);
+    } catch { /* The composer also works with storage disabled. */ }
+  }, [browserWorkspace, ready, subscription, claudeDesktop, chatGPTWork, prompt]);
 
   useEffect(() => {
     if (!ready) return;
-    window.localStorage.setItem("terracotta-garden-v3", JSON.stringify({
+    savePreference("terracotta-garden-v3", JSON.stringify({
       groundTiles,
       decorations,
       characterPosition,
@@ -497,9 +547,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready) return;
-    window.localStorage.setItem("terracotta-model-preference", modelPreference);
+    savePreference("terracotta-model-preference", modelPreference);
+    if (browserWorkspace) return;
     void fetch("/api/model-registry", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preference: modelPreference }) }).catch(() => undefined);
-  }, [modelPreference, ready]);
+  }, [browserWorkspace, modelPreference, ready]);
 
   const loadInitialData = useEffectEvent(() => {
     void loadRegistry();
@@ -507,8 +558,8 @@ export default function Home() {
   });
 
   useEffect(() => {
-    if (ready) loadInitialData();
-  }, [ready]);
+    if (ready && !browserWorkspace) loadInitialData();
+  }, [browserWorkspace, ready]);
 
   function applyContextPayload(payload: ContextPayload, replaceMessages = true) {
     setCurrentUser(payload.currentUser || "owner");
@@ -977,6 +1028,11 @@ export default function Home() {
   const groundByCell = useMemo(() => new Map(groundTiles.map((item) => [item.cell, item.grassId])), [groundTiles]);
   const fullLawnGrassId = groundTiles.length === 20 && groundTiles.every((tile) => tile.grassId === groundTiles[0]?.grassId) ? groundTiles[0].grassId : null;
   const fullLawn = grassShop.find((item) => item.id === fullLawnGrassId) ?? null;
+  const lawnStyle = fullLawn ? { backgroundImage: `url(${fullLawn.connectedAsset})` } : undefined;
+  const gardenCells = fullLawn ? null : Array.from({ length: 20 }, (_, cell) => {
+    const grass = grassShop.find((item) => item.id === groundByCell.get(cell));
+    return <i key={cell} className={grass ? "has-grass" : ""} style={grass ? { backgroundImage: `url(${grass.connectedAsset})` } : undefined} />;
+  });
   const gardenCategories = useMemo(() => ["전체", ...Array.from(new Set(gardenShop.map((item) => item.category)))], []);
   const visibleGardenItems = useMemo(() => gardenShop.filter((item) => shopCategory === "전체" || item.category === shopCategory), [shopCategory]);
   const visibleModelInsights = useMemo(() => (modelInsights?.models ?? []).filter((model) => modelInsightFilter === "전체" || model.categories.includes(modelInsightFilter)), [modelInsightFilter, modelInsights]);
@@ -1045,6 +1101,56 @@ export default function Home() {
     event.preventDefault();
     const task = prompt.trim();
     if (!task || !canSubmitTask) return;
+    if (localChat) {
+      if (!localAccount.connected || !localAccount.model) { setConnectionsOpen(true); return; }
+      const conversation = activeConversation.current;
+      const controller = new AbortController();
+      localRequest.current = controller;
+      const priorTurns = messages.filter((item, i) => !item.retryPrompt && !(item.role === "user" && messages[i + 1]?.retryPrompt === item.text));
+      const history = [...priorTurns, { role: "user" as const, text: task }];
+      setMessages(history);
+      setPrompt("");
+      setIsWorking(true);
+      try {
+        const reply = await localAccount.ask(history.map(({ role, text }) => ({ role, text })), controller.signal);
+        if (conversation !== activeConversation.current) return;
+        setMessages(items => [...items, { role: "assistant", text: reply.text, models: reply.model }]);
+        setSparks(value => value + 36);
+        setGrowth(value => value + 1);
+      } catch (error) {
+        if (conversation === activeConversation.current && !controller.signal.aborted) {
+          setMessages(items => [...items, { role: "assistant", text: error instanceof Error ? error.message : "답변을 받지 못했어요.", retryPrompt: task }]);
+        }
+      } finally {
+        if (conversation === activeConversation.current) setIsWorking(false);
+        if (localRequest.current === controller) localRequest.current = null;
+      }
+      return;
+    }
+    if (browserWorkspace) {
+      if (useClaudeApp) {
+        window.location.assign(`claude://claude.ai/new?${claudeQuery}`);
+        setHandoffNote("Claude 앱에서 질문을 확인하고 전송하세요. 앱이 열리지 않으면 구독 연결 설정에서 웹사이트로 전환하세요.");
+        return;
+      }
+      if (useWorkDraft) {
+        window.open(`https://chatgpt.com/?${workQuery}`, "_blank", "noopener,noreferrer");
+        setHandoffNote("ChatGPT Work에서 초안을 확인하고 보내세요. 작성한 질문은 이 입력창에도 남아 있어요.");
+        return;
+      }
+      const copied = navigator.clipboard?.writeText(task);
+      window.open(service.url, "_blank", "noopener,noreferrer");
+      try {
+        if (!copied) throw new Error("unavailable");
+        await copied;
+        setHandoffNote(`질문을 복사했어요. ${service.name}에서 붙여넣고 대화를 이어가세요.`);
+      } catch {
+        composerRef.current?.focus();
+        composerRef.current?.select();
+        setHandoffNote(`자동 복사가 어려워요. 입력창의 질문을 직접 복사해 ${service.name}에 붙여넣으세요.`);
+      }
+      return;
+    }
     const conversation = activeConversation.current;
     const team = selectedTeam;
     setMessages((items) => [...items, { role: "user", text: task }]);
@@ -1094,6 +1200,7 @@ export default function Home() {
   }
 
   function fillComposer(text: string) {
+    setHandoffNote("");
     setPrompt(text);
     composerRef.current?.focus();
   }
@@ -1220,7 +1327,35 @@ export default function Home() {
   }
 
   function newChat(targetProjectId: string | null = projectId) {
+    if (browserWorkspace) {
+      activeConversation.current++;
+      localRequest.current?.abort();
+      setMessages([]);
+      setIsWorking(false);
+      setPrompt("");
+      setHandoffNote("");
+      dismissNavigation();
+      composerRef.current?.focus();
+      return;
+    }
     return loadWorkContext({ create: true, projectId: targetProjectId });
+  }
+
+  function openModels() {
+    dismissNavigation();
+    if (browserWorkspace) setConnectionsOpen(true);
+    else setSettingsOpen(true);
+  }
+
+  function selectSubscription(value: SubscriptionProvider) {
+    if (value !== subscription && localRequest.current) {
+      activeConversation.current++;
+      localRequest.current.abort();
+      localRequest.current = null;
+      setIsWorking(false);
+    }
+    setSubscription(value);
+    setHandoffNote("");
   }
 
   const workContextBar = (
@@ -1261,15 +1396,17 @@ export default function Home() {
 
         <nav className="sidebar-nav" aria-label="주요 메뉴">
           <button className="active" onClick={dismissNavigation}><PixelIcon name="chat" /> 대화</button>
-          <button onClick={() => openProjectWorkspace()}><PixelIcon name="folder" /> 프로젝트</button>
+          {!browserWorkspace && <button onClick={() => openProjectWorkspace()}><PixelIcon name="folder" /> 프로젝트</button>}
           <button onClick={() => { setGardenOpen(true); dismissNavigation(); }}><PixelIcon name="sprout" /> 테라코타 가든</button>
+          {!browserWorkspace && <>
           <button onClick={openMcpHub}><PixelIcon name="link" /> MCP 연결</button>
           <button onClick={openLocalAgent}><PixelIcon name="terminal" /> 로컬 터미널</button>
           <button onClick={openModelLab}><PixelIcon name="chart" /> 모델 연구소</button>
-          <button onClick={() => { setSettingsOpen(true); dismissNavigation(); }}><PixelIcon name="sliders" /> 모델 및 구독</button>
+          </>}
+          <button onClick={openModels}><PixelIcon name="sliders" /> {browserWorkspace ? "내 구독" : "모델 및 구독"}</button>
         </nav>
 
-        <div className="project-sidebar">
+        {!browserWorkspace && <><div className="project-sidebar">
           <div><p>프로젝트</p><button onClick={() => openProjectWorkspace(null)} aria-label="새 프로젝트">＋</button></div>
           <button className={!activeProject ? "active" : ""} onClick={() => void newChat(null)}><i style={{ background: "#b8b8b1" }} />일반 대화</button>
           {projects.slice(0, 6).map((project) => (
@@ -1284,10 +1421,13 @@ export default function Home() {
           )) : <small>{contextLoading ? "기억을 불러오는 중…" : "이 프로젝트에 아직 대화가 없어요."}</small>}
         </div>
 
+        </>}
+        {mode === "browser" && <a className="private-workspace-link" href="/owner/login">보관한 개인 프로젝트 열기</a>}
+        {mode === "personal-owner" && <a className="private-workspace-link" href="?subscriptions=1">내 구독으로 대화하기</a>}
         <div className="sidebar-account">
           <span className="account-sprout" aria-hidden="true"><PixelIcon name="sprout" /></span>
           <div><b>내 테라코타</b><small>{sparks.toLocaleString()} Sparks</small></div>
-          <button onClick={() => { setSettingsOpen(true); dismissNavigation(); }} aria-label="모델 및 구독 설정 열기">•••</button>
+          <button onClick={openModels} aria-label="모델 및 구독 설정 열기">•••</button>
         </div>
       </aside>
 
@@ -1296,11 +1436,11 @@ export default function Home() {
       <section className="chat-panel">
         <header className="chat-header">
           <button className="mobile-menu-button" ref={menuTriggerRef} onClick={() => setMobileMenu(true)} aria-expanded={mobileMenu} aria-controls="workspace-navigation" aria-label="메뉴 열기">☰</button>
-          <button className="model-switch" onClick={() => setSettingsOpen(true)}>
-            <b className="model-brand-wide">Terracotta Auto</b><b className="model-brand-compact">자동</b> · {preferenceLabel} <span>⌄</span>
+          <button className="model-switch" onClick={openModels}>
+            {browserWorkspace ? <>내 구독 · {service.name}</> : <><b className="model-brand-wide">Terracotta Auto</b><b className="model-brand-compact">자동</b> · {preferenceLabel}</>} <span>⌄</span>
           </button>
-          <button className={`project-scope ${activeProject ? "active" : ""}`} onClick={() => openProjectWorkspace(activeProject?.id ?? null)}><i style={{ background: activeProject?.color ?? "#b8b8b1" }} />{activeProject?.name ?? "일반 대화"}<span>⌄</span></button>
-          <span className="private-state"><i /> GPT · Claude · Gemini 공용 기억</span>
+          {!browserWorkspace && <button className={`project-scope ${activeProject ? "active" : ""}`} onClick={() => openProjectWorkspace(activeProject?.id ?? null)}><i style={{ background: activeProject?.color ?? "#b8b8b1" }} />{activeProject?.name ?? "일반 대화"}<span>⌄</span></button>}
+          {!browserWorkspace && <span className="private-state"><i /> GPT · Claude · Gemini 공용 기억</span>}
           <button className="mobile-garden" onClick={() => setGardenOpen(true)} aria-label="테라코타 가든 열기"><PixelIcon name="sprout" /></button>
         </header>
 
@@ -1310,7 +1450,7 @@ export default function Home() {
               <div className="empty-state">
                 <span className="hello-seed" aria-hidden="true" />
                 <h1>무엇을 도와드릴까요?</h1>
-                <p>필요한 모델은 제가 알아서 고를게요.</p>
+                <p>{browserWorkspace ? "평소 쓰는 구독으로 대화를 시작하세요." : "필요한 모델은 제가 알아서 고를게요."}</p>
               </div>
             ) : (
               <div className="message-list" role="log" aria-label="대화 기록" aria-relevant="additions">
@@ -1345,7 +1485,7 @@ export default function Home() {
                 {isWorking && (
                   <article className="message assistant thinking">
                     <span className="assistant-seed"><TerracottaMark size="tiny" /></span>
-                    <div><p><i /><i /><i /></p><small>{selectedTeam}가 작업 중</small></div>
+                    <div><p><i /><i /><i /></p><small>{localChat ? "ChatGPT" : selectedTeam}가 작업 중</small></div>
                   </article>
                 )}
               </div>
@@ -1359,12 +1499,12 @@ export default function Home() {
                 <button type="button" onClick={() => void loadWorkContext(failedContext)}>다시 시도</button>
               </div>
             )}
-            {messages.length > 0 && workContextBar}
+            {!browserWorkspace && messages.length > 0 && workContextBar}
             <form className="composer" onSubmit={submitTask}>
               <textarea
                 ref={composerRef}
                 value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
+                onChange={(event) => { setPrompt(event.target.value); setHandoffNote(""); }}
                 onKeyDown={handleComposerKey}
                 placeholder={canEditSession ? "테라코타에게 무엇이든 물어보세요" : "보기 전용 작업입니다"}
                 aria-label="테라코타에게 보낼 메시지"
@@ -1372,16 +1512,20 @@ export default function Home() {
                 rows={1}
               />
               <div className="composer-actions">
-                <div>
+                {browserWorkspace ? <div className="subscription-choices" role="group" aria-label="질문을 보낼 서비스">
+                  {(["chatgpt", "claude"] as const).map(id => <button key={id} type="button" aria-pressed={subscription === id} onClick={() => selectSubscription(id)}>{subscriptionServices[id].name}</button>)}
+                </div> : <div>
                   <button type="button" aria-label="프로젝트 파일" onClick={() => openProjectWorkspace(activeProject?.id ?? null, activeProject ? "files" : "overview")}>＋</button>
                   <button type="button" aria-label="웹 검색 요청 추가" title="웹 검색 요청 추가" onClick={() => fillComposer(prompt.trim() ? `${prompt.trimEnd()}\n웹에서 최신 자료를 찾아 출처와 함께 알려줘.` : "웹에서 최신 자료를 찾아 출처와 함께 알려줘. 주제는 ")}>◎</button>
-                </div>
-                <span>{selectedTeam}</span>
-                <button className="send-button" disabled={!prompt.trim() || !canSubmitTask} aria-label="메시지 보내기">↑</button>
+                </div>}
+                {browserWorkspace
+                  ? <button className="subscription-send" disabled={!prompt.trim() || !canSubmitTask}>{subscriptionAction}</button>
+                  : <><span>{selectedTeam}</span><button className="send-button" disabled={!prompt.trim() || !canSubmitTask} aria-label="메시지 보내기">↑</button></>}
               </div>
             </form>
-            <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>
-            {messages.length === 0 && (
+            {browserWorkspace ? <p className="handoff-note" role="status">{handoffNote || subscriptionHint}</p> : <p>테라코타는 실수할 수 있어요. 중요한 정보는 확인해 주세요.</p>}
+            {browserWorkspace && <button className="subscription-settings" onClick={openModels}>구독 연결 설정</button>}
+            {!browserWorkspace && messages.length === 0 && (
               <details className="start-context">
                 <summary>{pendingTeamHandoff ? "팀 인계 확인" : "모델 전환 및 팀 공유"}</summary>
                 {workContextBar}
@@ -1410,11 +1554,8 @@ export default function Home() {
           <button onClick={() => setGardenOpen(true)} aria-label="가든 크게 보기">↗</button>
         </div>
         <button className="pixel-garden" onClick={() => setGardenOpen(true)} aria-label="가든 열기">
-          <div className={`garden-ground-grid mini ${fullLawn ? "connected" : ""}`}>
-            {Array.from({ length: 20 }, (_, index) => {
-              const grass = grassShop.find((item) => item.id === groundByCell.get(index));
-              return <i key={index} className={grass ? "has-grass" : ""} style={grass ? { backgroundImage: `url(${fullLawn ? grass.connectedAsset : grass.asset})` } : undefined} />;
-            })}
+          <div className={`garden-ground-grid mini ${fullLawn ? "connected" : ""}`} style={lawnStyle} aria-hidden="true">
+            {gardenCells}
           </div>
           {decorations.map((placement) => {
               const item = gardenShop.find((entry) => entry.id === placement.itemId);
@@ -1429,6 +1570,14 @@ export default function Home() {
         <progress className="garden-progress" value={groundTiles.length} max={20} aria-label="심은 잔디" />
       </aside>
 
+      {connectionsOpen && <ModelConnections provider={subscription} onSelect={selectSubscription} onDismiss={() => setConnectionsOpen(false)}>
+        {mode === "browser" && subscription === "chatgpt" && <label className="claude-app-choice"><input type="checkbox" checked={chatGPTWork} onChange={event => setChatGPTWork(event.target.checked)} /> ChatGPT Work에 질문을 초안으로 열기</label>}
+        {subscription === "claude" ? <label className="claude-app-choice"><input type="checkbox" checked={claudeDesktop} onChange={event => setClaudeDesktop(event.target.checked)} /> 이 PC의 Claude 데스크톱 앱에 질문 미리 채우기</label> : mode === "local" ? <LocalChatGPTAccount account={localAccount} /> :
+          <details className="local-plan-help"><summary>이 화면 안에서 ChatGPT 답변 받기</summary>
+            <p>테라코타를 설치한 PC에서 <code>npm run dev:subscriptions</code>를 실행한 뒤 로컬 작업실에서 ChatGPT로 로그인하세요. 구독 인증은 그 PC에서 처리합니다.</p>
+            <a href="http://127.0.0.1:4387/?subscriptions=1" target="_blank" rel="noopener noreferrer">이 PC의 로컬 작업실 열기 ↗</a>
+          </details>}
+      </ModelConnections>}
       {teamOpen && (
         <WorkspaceDialog label="팀 작업 공유" panelClass="team-dialog" onDismiss={() => setTeamOpen(false)}>
             <button className="dialog-close" onClick={() => setTeamOpen(false)} aria-label="닫기">×</button>
@@ -1499,11 +1648,8 @@ export default function Home() {
               onPointerUp={finishGardenDrag}
               onPointerCancel={finishGardenDrag}
             >
-              <div className={`garden-ground-grid large ${fullLawn ? "connected" : ""}`} aria-label="5×4 잔디 지면">
-                {Array.from({ length: 20 }, (_, index) => {
-                  const grass = grassShop.find((item) => item.id === groundByCell.get(index));
-                  return <i key={index} className={grass ? "has-grass" : ""} style={grass ? { backgroundImage: `url(${fullLawn ? grass.connectedAsset : grass.asset})` } : undefined} aria-label={`${index + 1}번째 ${grass?.name ?? "흙"}`} />;
-                })}
+              <div className={`garden-ground-grid large ${fullLawn ? "connected" : ""}`} style={lawnStyle} role="img" aria-label={`정원 20구획 중 잔디 ${groundTiles.length}구획`}>
+                {gardenCells}
               </div>
               {decorations.map((placement) => {
                 const item = gardenShop.find((entry) => entry.id === placement.itemId);

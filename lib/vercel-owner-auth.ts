@@ -2,6 +2,7 @@ import { callbackPath, clearFlowCookie, finishVercelSignIn, startVercelSignIn, v
 
 const SESSION_COOKIE = "__Host-terracotta_owner";
 const SESSION_SECONDS = 14 * 24 * 60 * 60;
+export const browserWorkspaceHeader = "x-terracotta-browser-workspace";
 const LOGIN_PATH = "/owner/login";
 const LOGOUT_PATH = "/owner/logout";
 const encoder = new TextEncoder();
@@ -126,10 +127,30 @@ async function passwordMatches(attempt: string, password: string) {
 
 export function personalRequestHeaders(request: Request) {
   const headers = new Headers(request.headers);
+  headers.delete(browserWorkspaceHeader);
+  headers.delete("x-terracotta-local-subscriptions");
   for (const name of [...headers.keys()]) {
     if (name.startsWith("oai-authenticated-user-")) headers.delete(name);
   }
   return headers;
+}
+
+function canonicalRedirect(url: URL, productionHost: string) {
+  const canonical = new URL("https://" + productionHost);
+  canonical.pathname = url.pathname;
+  canonical.search = url.search;
+  return redirect(canonical);
+}
+
+function isOwnerConfigured(password?: string, oidc?: VercelSignIn) {
+  return oidc ? Boolean(oidc.clientId && oidc.ownerId) : Boolean(password && /^[\x21-\x7e]{32,256}$/.test(password));
+}
+
+async function hasOwnerSession(request: Request, origin: string, password?: string, oidc?: VercelSignIn) {
+  const token = readSession(request);
+  if (!token) return false;
+  if (oidc) return verifyVercelOwner(token, oidc).then(() => true, () => false);
+  return password ? validSession(token, password, origin) : false;
 }
 
 function publicRequestUrl(request: Request, deploymentHosts: readonly (string | undefined)[]) {
@@ -161,7 +182,7 @@ function publicRequestUrl(request: Request, deploymentHosts: readonly (string | 
 
 /** A null result lets Next handle the request. The worker route also verifies its scoped agent token against the database. */
 export async function authorizePersonalRequest(request: Request, password: string | undefined, deploymentHosts: readonly (string | undefined)[] = [], oidc?: VercelSignIn): Promise<Response | null> {
-  if (oidc ? !oidc.clientId || !oidc.ownerId : !password || !/^[\x21-\x7e]{32,256}$/.test(password)) {
+  if (!isOwnerConfigured(password, oidc)) {
     return errorResponse(503, "개인 작업실의 로그인 설정을 확인해 주세요.");
   }
   const url = publicRequestUrl(request, deploymentHosts);
@@ -179,10 +200,7 @@ export async function authorizePersonalRequest(request: Request, password: strin
   if (!read && request.headers.get("origin") !== url.origin) return errorResponse(403, "요청 출처를 확인할 수 없습니다.");
   if (oidc && oidc.productionHost && url.host !== oidc.productionHost) {
     if (!read || path.startsWith("/api/") || path === callbackPath) return errorResponse(403, "개인 운영 주소로 접속해 주세요.");
-    const canonical = new URL("https://" + oidc.productionHost);
-    canonical.pathname = url.pathname;
-    canonical.search = url.search;
-    return redirect(canonical);
+    return canonicalRedirect(url, oidc.productionHost);
   }
   if (oidc && path === callbackPath) {
     if (request.method !== "GET") return errorResponse(405, "지원하지 않는 요청입니다.");
@@ -218,10 +236,35 @@ export async function authorizePersonalRequest(request: Request, password: strin
     if (request.method !== "POST") return errorResponse(405, "지원하지 않는 요청입니다.");
     return redirect(new URL(LOGIN_PATH, url.origin), sessionCookie("", 0));
   }
-  const token = readSession(request);
-  if (token && (oidc ? await verifyVercelOwner(token, oidc).then(() => true, () => false) : await validSession(token, password!, url.origin))) return null;
+  if (await hasOwnerSession(request, url.origin, password, oidc)) return null;
   if (!read || path === "/api" || path.startsWith("/api/")) return errorResponse(401, "개인 작업실에 로그인해 주세요.");
   const login = new URL(LOGIN_PATH, url.origin);
   login.searchParams.set("returnTo", path + url.search);
   return redirect(login);
+}
+
+function isPublicAsset(path: string) {
+  return path === "/favicon.svg" || path === "/og-terracotta.png" ||
+    /^\/assets\/(?:[\w-]+\/)*[\w-]+\.(?:png|svg|webp|jpg|jpeg|avif)$/i.test(path) ||
+    (path.startsWith("/_next/static/") && !/%|\\|\/\.\.?\//.test(path));
+}
+
+/** Only the landing document can run in browser-only mode. API and owner routes
+ * always go through the original private gate, even when opened from that page. */
+export async function resolvePersonalRequest(request: Request, password: string | undefined, deploymentHosts: readonly (string | undefined)[] = [], oidc?: VercelSignIn): Promise<Response | { requestHeaders: Headers; staticAsset: boolean }> {
+  const path = new URL(request.url).pathname;
+  const read = request.method === "GET" || request.method === "HEAD";
+  const staticAsset = isPublicAsset(path);
+  if (!read || (path !== "/" && !staticAsset)) {
+    const denied = await authorizePersonalRequest(request, password, deploymentHosts, oidc);
+    return denied ?? { requestHeaders: personalRequestHeaders(request), staticAsset: false };
+  }
+  const url = publicRequestUrl(request, deploymentHosts);
+  if (!url) return errorResponse(403, "요청 도메인을 확인할 수 없습니다.");
+  if (oidc?.productionHost && url.host !== oidc.productionHost) return canonicalRedirect(url, oidc.productionHost);
+  const requestHeaders = personalRequestHeaders(request);
+  if (!staticAsset && (url.searchParams.get("subscriptions") === "1" || !(isOwnerConfigured(password, oidc) && await hasOwnerSession(request, url.origin, password, oidc)))) {
+    requestHeaders.set(browserWorkspaceHeader, "1");
+  }
+  return { requestHeaders, staticAsset };
 }

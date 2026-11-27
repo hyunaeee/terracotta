@@ -1,0 +1,47 @@
+.panel:global(.dialog) {
+  width: min(100%, 450px);
+  color: var(--ink);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.panel h2 { margin: 0 40px 8px 0; font-size: 24px; letter-spacing: -.04em; }
+.panel p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+.options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 20px 0;
+  padding: 0;
+  border: 0;
+}
+.options legend { margin-bottom: 8px; padding: 0; font-size: 13px; font-weight: 650; }
+.option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 45px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 650;
+}
+.option:has(input:checked) { border-color: #9dbd83; background: #eef8e8; color: #375034; }
+.option input { width: 16px; height: 16px; margin: 0; accent-color: #517844; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.actions a { padding-block: 7px; color: var(--moss); font-size: 13px; text-underline-offset: 3px; }
+.actions button {
+  min-width: 62px;
+  min-height: 40px;
+  padding: 7px 14px;
+  border: 1px solid #a5cd8a;
+  border-radius: 9px;
+  background: var(--sprout, #b6e99b);
+  color: #304429;
+  font-size: 14px;
+  font-weight: 650;
+}
+.panel :focus-visible { outline: 2px solid #52764b; outline-offset: 2px; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

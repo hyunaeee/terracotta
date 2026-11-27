@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 import { base64url, generateKeyPair, SignJWT } from "jose";
-import { authorizePersonalRequest, personalRequestHeaders } from "../lib/vercel-owner-auth.ts";
+import { authorizePersonalRequest, browserWorkspaceHeader, personalRequestHeaders, resolvePersonalRequest } from "../lib/vercel-owner-auth.ts";
 
 const origin = "https://workspace.example.com";
 const password = randomBytes(32).toString("base64url");
@@ -13,7 +13,7 @@ function login(value, returnTo = "/", host = origin) {
   return check(req(path, { method: "POST", headers: { origin: host }, body: new URLSearchParams({ password: value }) }));
 }
 
-test("the owner page requires login and private APIs never trust supplied identity", async () => {
+test("the private gate requires login and private APIs never trust supplied identity", async () => {
   const page = await check(req("/?tab=projects"));
   assert.equal(page.status, 303);
   assert.equal(new URL(page.headers.get("location")).searchParams.get("returnTo"), "/?tab=projects");
@@ -26,6 +26,54 @@ test("the owner page requires login and private APIs never trust supplied identi
   assert.equal(headers.get("x-message"), "keep");
   assert.equal((await authorizePersonalRequest(fake, undefined)).status, 503);
   assert.equal((await authorizePersonalRequest(fake, "short")).status, 503);
+});
+
+test("the root renders in browser mode for visitors but in owner mode only for a signed session", async () => {
+  for (const configuration of [undefined, password]) {
+    for (const method of ["GET", "HEAD"]) {
+      const result = await resolvePersonalRequest(req("/?tab=garden", { method }), configuration);
+      assert.equal(result.staticAsset, false);
+      assert.equal(result.requestHeaders.get(browserWorkspaceHeader), "1");
+    }
+  }
+  const signedIn = await login(password);
+  const cookie = signedIn.headers.get("set-cookie").split(";")[0];
+  const headers = { cookie, [browserWorkspaceHeader]: "untrusted", "oai-authenticated-user-email": "unknown" };
+  for (const path of ["/", "/api/context"]) {
+    const owner = await resolvePersonalRequest(req(path, { headers }), password);
+    assert.equal(owner.requestHeaders.has(browserWorkspaceHeader), false);
+    assert.equal(owner.requestHeaders.has("oai-authenticated-user-email"), false);
+  }
+  const subscriptions = await resolvePersonalRequest(req("/?subscriptions=1", { headers }), password);
+  assert.equal(subscriptions.requestHeaders.get(browserWorkspaceHeader), "1");
+  const expired = await resolvePersonalRequest(req("/", { headers: { cookie } }), "a-new-password-with-at-least-32-characters");
+  assert.equal(expired.requestHeaders.get(browserWorkspaceHeader), "1");
+});
+
+test("public image and framework assets load without a session; private routes keep their own gate", async () => {
+  const headers = { [browserWorkspaceHeader]: "1", origin };
+  for (const path of ["/favicon.svg", "/og-terracotta.png", "/assets/terracotta-stage-1.png", "/assets/garden/grass.png", "/_next/static/chunks/app.js", "/_next/static/media/font.woff2"]) {
+    const asset = await resolvePersonalRequest(req(path, { headers }), undefined);
+    assert.equal(asset.staticAsset, true);
+    assert.equal(asset.requestHeaders.has(browserWorkspaceHeader), false);
+  }
+  for (const path of ["/api/context", "/api/assistant", "/api/projects", "/api/mcp"]) {
+    assert.equal((await resolvePersonalRequest(req(path, { headers }), password)).status, 401);
+    assert.equal((await resolvePersonalRequest(req(path, { headers }), undefined)).status, 503);
+  }
+  assert.equal((await resolvePersonalRequest(req("/", { method: "POST", headers }), password)).status, 401);
+  assert.equal((await resolvePersonalRequest(req("/_next/data/build/private.json"), password)).status, 303);
+});
+
+test("public entry and assets respect the configured deployment host", async () => {
+  const config = { clientId: "client", ownerId: "owner", productionHost: "owner.example" };
+  const hosts = [config.productionHost, "preview.example"];
+  for (const path of ["/", "/assets/terracotta-stage-1.png"]) {
+    const unknown = await resolvePersonalRequest(req(path), undefined, hosts, config);
+    assert.equal(unknown.status, 403);
+    const preview = await resolvePersonalRequest(new Request("https://preview.example" + path), undefined, hosts, config);
+    assert.equal(preview.headers.get("location"), "https://owner.example" + path);
+  }
 });
 
 test("a password session is origin-bound, expiring, signed and revoked by password rotation", async t => {

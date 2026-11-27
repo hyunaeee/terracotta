@@ -11,6 +11,7 @@ type Connection = {
 
 const PROTOCOL_VERSION = "2025-11-25";
 const presets = [
+  { id: "higgsfield", name: "Higgsfield", url: "https://mcp.higgsfield.ai/mcp", category: "디자인", auth: "oauth", setup: "auto", note: "이미지·영상 생성 · 내 Higgsfield 크레딧", docs: "https://higgsfield.ai/mcp" },
   { id: "github", name: "GitHub", url: "https://api.githubcopilot.com/mcp/", category: "개발", auth: "oauth", setup: "auto", note: "저장소·이슈·PR", docs: "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp-in-your-ide/extend-copilot-chat-with-mcp" },
   { id: "notion", name: "Notion", url: "https://mcp.notion.com/mcp", category: "지식", auth: "oauth", setup: "auto", note: "페이지 검색·작성", docs: "https://developers.notion.com/guides/mcp/get-started-with-mcp" },
   { id: "figma", name: "Figma", url: "https://mcp.figma.com/mcp", category: "디자인", auth: "oauth", setup: "auto", note: "디자인 컨텍스트", docs: "https://help.figma.com/hc/en-us/articles/39890361040535-VS-Code-and-Figma-Set-up-the-MCP-server" },

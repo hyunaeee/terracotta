@@ -1,0 +1,27 @@
+.account {
+  display: grid;
+  gap: .6rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line, #e7e5df);
+  color: var(--ink, #382e29);
+}
+.account h3, .account p { margin: 0; }
+.account h3 { font-size: 1rem; }
+.account p { color: var(--muted, #69645e); font-size: .875rem; line-height: 1.55; overflow-wrap: anywhere; }
+.account label { display: grid; gap: .25rem; font-size: .875rem; }
+.account select, .account button {
+  min-height: 40px;
+  padding: .4rem .7rem;
+  border: 1px solid var(--line, #e7e5df);
+  border-radius: 8px;
+  background: white;
+  color: inherit;
+  font: inherit;
+}
+.account select { max-width: 100%; }
+.account button { width: fit-content; font-size: .875rem; }
+.actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.account .primary { background: var(--sprout, #b6e99b); color: #34422c; }
+.guide { justify-self: start; color: var(--moss, #46683b); font-size: .813rem; text-decoration: underline; text-underline-offset: 2px; }
+.account .error { color: #8e4033; }

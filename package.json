@@ -10,10 +10,11 @@
   },
   "scripts": {
     "dev": "vinext dev",
+    "dev:subscriptions": "vinext dev --hostname 127.0.0.1 --port 4387",
     "build": "vinext build",
     "build:vercel": "next build",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/selfhost-runtime.test.mjs tests/vercel-database.test.mjs tests/vercel-owner-auth.test.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

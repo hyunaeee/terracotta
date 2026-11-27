@@ -2,7 +2,13 @@
 
 ## 개인 Vercel 배포
 
-Vercel에서는 `npm run build:vercel`로 Next.js를 빌드합니다. Production 환경에 Turso 데이터베이스를 연결하면 대화와 프로젝트가 새 배포에도 유지됩니다. 가든은 같은 주소로 접속한 브라우저의 로컬 저장소에 보관됩니다.
+Vercel에서는 `npm run build:vercel`로 Next.js를 빌드합니다. 운영 주소의 첫 화면에서 방문자는 ChatGPT 또는 Claude를 선택할 수 있습니다. **복사하고 열기**를 누르면 질문을 클립보드에 복사하고 선택한 공식 웹사이트를 엽니다. 방문자는 그곳에서 자신의 계정으로 질문을 보내며, 로그인 정보와 답변은 해당 서비스에서 처리합니다. 이 경로는 모델 API 키 없이 사용할 수 있습니다.
+
+Claude 데스크톱 앱이 설치된 방문자는 **구독 연결 설정**에서 앱의 질문 미리 채우기를 켤 수 있습니다. 로컬 ChatGPT 연결을 사용하려면 각자의 PC에서 `npm run dev:subscriptions`를 실행하고 `http://127.0.0.1:4387/?subscriptions=1`에서 OpenAI에 로그인합니다. 구독 토큰은 해당 PC에서 실행 중인 서버 메모리에만 유지됩니다. Vercel에 ChatGPT 구독 토큰을 등록할 필요가 없습니다. [로컬 구독 작업실 실행 방법](./README.md#내-pc에서-chatgpt-연결하기)
+
+공개 화면의 정원, Sparks와 서비스 선택은 해당 주소의 브라우저 로컬 저장소에 보관됩니다. 초안은 탭의 세션 저장소에 남습니다. 소유자용 대화, 프로젝트와 MCP 도구 기록은 인증된 전용 API를 통해 접근합니다. 이 데이터를 유지하려면 Production에 Turso를 연결하고 하단의 소유자 로그인을 구성하세요.
+
+### 소유자 전용 기능 구성
 
 | Production 환경 변수 | 용도 |
 | --- | --- |
@@ -10,13 +16,13 @@ Vercel에서는 `npm run build:vercel`로 Next.js를 빌드합니다. Production
 | `TERRACOTTA_VERCEL_CLIENT_ID`, `TERRACOTTA_VERCEL_OWNER_ID` | Sign in with Vercel 앱의 Client ID와 작업실에 접근할 Vercel 사용자의 고유 ID입니다. |
 | `TERRACOTTA_OWNER_PASSWORD` | Vercel 로그인 설정을 생략하고 비밀번호 방식으로 직접 운영할 때 설정합니다. 무작위 32바이트를 base64url로 인코딩합니다. |
 | `MCP_TOKEN_ENCRYPTION_KEY` | MCP 연결 정보를 보호하는 키입니다. 무작위 32바이트를 base64로 인코딩해 설정하고 배포 간에 같은 값을 유지합니다. |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `PERPLEXITY_API_KEY` | 실제 AI 대화에 사용할 공급사의 키를 설정합니다. |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `PERPLEXITY_API_KEY` | 개인 프로젝트에서 서버 라우터로 호출할 공급사의 API 키를 선택해 설정합니다. |
 
 Vercel의 **Settings → Environments → Production → Branch Tracking**에서 운영 브랜치를 확인할 수 있습니다. 연결된 GitHub 저장소의 해당 브랜치에 푸시하면 빌드가 성공한 후 같은 운영 주소에 반영됩니다. 환경 변수만 바꾼 경우에는 Production을 다시 배포하세요. 로그인 후 `/api/health`에서 데이터베이스 연결을 확인할 수 있습니다.
 
 개인 팀의 **Settings → Apps**에서 Sign in with Vercel 앱을 등록합니다. 인증 방식은 `none`, 범위는 `openid`로 설정하고 운영 주소 뒤에 `/owner/callback`을 붙여 콜백 URL로 등록합니다. [Vercel 앱 설정 안내](https://vercel.com/docs/sign-in-with-vercel/manage-from-dashboard)
 
-운영 주소에서 **Vercel로 로그인**을 누릅니다. 로그인한 사용자의 고유 ID가 설정값과 일치하면 처음 요청한 작업실 페이지로 돌아갑니다. 브라우저 세션은 서명된 ID 토큰의 만료 시점까지, 최대 한 시간 동안 유지됩니다. `/owner/logout`에서 로그아웃할 수 있습니다.
+사이드바 **보관한 개인 프로젝트 열기** 또는 `/owner/login`에서 **Vercel로 로그인**을 누릅니다. 로그인한 사용자의 고유 ID가 설정값과 일치하면 소유자 작업실이 열립니다. 브라우저 세션은 서명된 ID 토큰의 만료 시점까지, 최대 한 시간 동안 유지됩니다. `/owner/logout`에서 로그아웃할 수 있습니다. 소유자로 로그인한 상태에서 공개 구독 화면을 확인하려면 운영 주소 뒤에 `/?subscriptions=1`을 붙이세요.
 
 ## Docker 배포
 
